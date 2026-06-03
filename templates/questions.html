@@ -1,0 +1,88 @@
+{% extends "base.html" %}
+{% block title %}题目管理{% endblock %}
+
+{% block content %}
+<div class="d-flex align-center gap-1 mb-2" style="justify-content:space-between;flex-wrap:wrap">
+    <h2>题目管理</h2>
+    <div class="d-flex gap-1">
+        <a href="{{ url_for('export_bank') }}" class="btn btn-success">📤 导出题库</a>
+        <a href="{{ url_for('import_json') }}" class="btn btn-outline">📥 导入备份</a>
+        <a href="{{ url_for('add_question') }}" class="btn btn-primary">+ 添加题目</a>
+    </div>
+</div>
+
+<!-- Filters -->
+<div class="card">
+    <form method="GET" class="d-flex gap-1 align-center flex-wrap">
+        <select name="subject" onchange="this.form.submit()">
+            <option value="">全部科目</option>
+            {% for s in subjects %}
+            <option value="{{ s.id }}" {% if sf==s.id|string %}selected{% endif %}>{{ s.name }}</option>
+            {% endfor %}
+        </select>
+        <select name="tag" onchange="this.form.submit()">
+            <option value="">全部标签</option>
+            {% for t in tags %}
+            <option value="{{ t }}" {% if tf==t %}selected{% endif %}>{{ t }}</option>
+            {% endfor %}
+        </select>
+        <select name="type" onchange="this.form.submit()">
+            <option value="">全部题型</option>
+            <option value="single_choice" {% if typef=='single_choice' %}selected{% endif %}>单选题</option>
+            <option value="multi_choice" {% if typef=='multi_choice' %}selected{% endif %}>多选题</option>
+            <option value="true_false" {% if typef=='true_false' %}selected{% endif %}>判断题</option>
+            <option value="fill_blank" {% if typef=='fill_blank' %}selected{% endif %}>填空题</option>
+        </select>
+    </form>
+</div>
+
+<!-- Question list -->
+<div class="card">
+    {% if not questions %}
+    <p class="text-center text-muted" style="padding:40px 0">暂无题目，点击"添加题目"开始</p>
+    {% endif %}
+
+    {% for q in questions %}
+    <div class="question-item">
+        <div class="question-num">{{ loop.index }}</div>
+        <div class="question-preview">
+            <div class="content question-content">
+                {{ q.content|safe }}
+            </div>
+            <div class="meta">
+                {% if q.subject_name %}
+                <span class="badge badge-subject">{{ q.subject_name }}</span>
+                {% endif %}
+                {% if q.tag %}
+                <span class="badge badge-tag">{{ q.tag }}</span>
+                {% endif %}
+                <span class="badge badge-type">
+                    {% if q.type=='single_choice' %}单选
+                    {% elif q.type=='multi_choice' %}多选
+                    {% elif q.type=='true_false' %}判断
+                    {% elif q.type=='fill_blank' %}填空
+                    {% endif %}
+                </span>
+                <span class="badge badge-diff-{{ q.difficulty }}">
+                    {% if q.difficulty==1 %}简单
+                    {% elif q.difficulty==2 %}中等
+                    {% else %}困难
+                    {% endif %}
+                </span>
+            </div>
+            <div class="mt-1 d-flex gap-1">
+                <a href="{{ url_for('edit_question', qid=q.id) }}" class="btn btn-sm btn-outline">编辑</a>
+                <form method="POST" action="{{ url_for('delete_question', qid=q.id) }}"
+                      onsubmit="return confirm('确定删除？')">
+                    <button type="submit" class="btn btn-sm btn-danger">删除</button>
+                </form>
+            </div>
+        </div>
+    </div>
+    {% endfor %}
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>renderContent();</script>
+{% endblock %}

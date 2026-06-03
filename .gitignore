@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.venv/
+venv/
+
+# Database (user data)
+banks/*.db
+banks/*.db-shm
+banks/*.db-wal
+
+# Uploaded images (user data)
+uploads/*
+
+# Import temp
+imports/*
+
+# OS
+Thumbs.db
+.DS_Store
+desktop.ini
+
+# IDE
+.vscode/
+.idea/
+*.swp

@@ -1,0 +1,98 @@
+{% extends "base.html" %}
+{% block title %}{{ bank_display }} - 题库首页{% endblock %}
+
+{% block content %}
+<div class="text-center mb-2">
+    <h2>📚 {{ bank_display }}</h2>
+    <p class="text-muted">共 {{ total }} 道题目</p>
+</div>
+
+<!-- Stats -->
+<div class="card">
+    <div class="d-flex gap-2 flex-wrap text-center">
+        <div style="flex:1">
+            <div style="font-size:1.5rem;font-weight:700;color:var(--primary)">{{ type_stats.single_choice }}</div>
+            <div class="text-muted" style="font-size:.8rem">单选题</div>
+        </div>
+        <div style="flex:1">
+            <div style="font-size:1.5rem;font-weight:700;color:var(--primary)">{{ type_stats.multi_choice }}</div>
+            <div class="text-muted" style="font-size:.8rem">多选题</div>
+        </div>
+        <div style="flex:1">
+            <div style="font-size:1.5rem;font-weight:700;color:var(--primary)">{{ type_stats.true_false }}</div>
+            <div class="text-muted" style="font-size:.8rem">判断题</div>
+        </div>
+        <div style="flex:1">
+            <div style="font-size:1.5rem;font-weight:700;color:var(--primary)">{{ type_stats.fill_blank }}</div>
+            <div class="text-muted" style="font-size:.8rem">填空题</div>
+        </div>
+    </div>
+</div>
+
+<!-- Start practice/exam -->
+<div class="d-flex gap-2">
+    <div class="card" style="flex:1">
+        <div class="card-title">📝 练习模式</div>
+        <p class="text-muted mb-1" style="font-size:.9rem">逐题作答，随时查看答案和解析</p>
+        <form method="POST" action="{{ url_for('practice_start') }}">
+            <div class="form-row mb-1">
+                <div class="form-group">
+                    <label>科目</label>
+                    <select name="subject_id">
+                        <option value="">全部科目</option>
+                        {% for s in subjects %}
+                        <option value="{{ s.id }}">{{ s.name }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>标签</label>
+                    <select name="tag">
+                        <option value="">全部标签</option>
+                        {% for t in tags %}
+                        <option value="{{ t }}">{{ t }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>题数（0=全部）</label>
+                    <input type="number" name="count" value="0" min="0">
+                </div>
+            </div>
+            <button type="submit" class="btn btn-success btn-block">开始练习</button>
+        </form>
+    </div>
+
+    <div class="card" style="flex:1">
+        <div class="card-title">📋 考试模式</div>
+        <p class="text-muted mb-1" style="font-size:.9rem">答完所有题目后自动评分</p>
+        <form method="POST" action="{{ url_for('exam_start') }}">
+            <div class="form-row mb-1">
+                <div class="form-group">
+                    <label>科目</label>
+                    <select name="subject_id">
+                        <option value="">全部科目</option>
+                        {% for s in subjects %}
+                        <option value="{{ s.id }}">{{ s.name }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>标签</label>
+                    <select name="tag">
+                        <option value="">全部标签</option>
+                        {% for t in tags %}
+                        <option value="{{ t }}">{{ t }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>题数（0=全部）</label>
+                    <input type="number" name="count" value="0" min="0">
+                </div>
+            </div>
+            <button type="submit" class="btn btn-primary btn-block">开始考试</button>
+        </form>
+    </div>
+</div>
+{% endblock %}

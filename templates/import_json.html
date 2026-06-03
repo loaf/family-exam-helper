@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% block title %}导入题库备份{% endblock %}
+
+{% block content %}
+<h2 class="mb-2">📥 导入题库备份（JSON）</h2>
+
+<div class="card">
+    <div class="card-title">上传导出文件</div>
+    <p class="text-muted mb-1" style="font-size:.9rem">
+        从其他题库导出的 <code>.json</code> 文件可以导入到当前题库。科目会自动合并（不重复创建），题目会追加到当前题库中。
+    </p>
+    <form method="POST" enctype="multipart/form-data">
+        <div class="form-group">
+            <label for="file">选择 .json 文件</label>
+            <input type="file" id="file" name="file" accept=".json" required>
+        </div>
+        <button type="submit" class="btn btn-primary">导入</button>
+        <a href="{{ url_for('list_questions') }}" class="btn btn-outline">取消</a>
+    </form>
+</div>
+
+<div class="card">
+    <div class="card-title">说明</div>
+    <ul style="padding-left:20px;font-size:.9rem;line-height:2">
+        <li>仅接受由本系统「导出题库」功能生成的 <code>.json</code> 文件</li>
+        <li>导入为<strong>追加模式</strong>：不会删除当前题库中已有的题目</li>
+        <li>科目自动合并：如果目标题库已有同名科目，则复用；否则新建</li>
+        <li>保留完整富文本内容，包括数学公式和代码</li>
+        <li><strong>注意</strong>：如果原题库中的题目包含图片，需要手动将 <code>uploads/</code> 文件夹中的对应图片也复制过来</li>
+    </ul>
+</div>
+{% endblock %}

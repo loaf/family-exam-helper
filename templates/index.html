@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block title %}家庭考试助手 - 题库选择{% endblock %}
+
+{% block content %}
+<div class="text-center mt-2 mb-2">
+    <h2>选择题库</h2>
+    <p class="text-muted">点击题库进入，或创建新题库</p>
+</div>
+
+<div class="bank-grid">
+    {% for bank in banks %}
+    <div class="bank-card {% if bank.filename == current %}active{% endif %}"
+         onclick="location.href='{{ url_for('select_bank', filename=bank.filename) }}'">
+        <h3>📚 {{ bank.name }}</h3>
+        <div class="meta">{{ bank.count }} 道题目</div>
+        <div class="actions" onclick="event.stopPropagation()">
+            <form method="POST" action="{{ url_for('delete_bank', filename=bank.filename) }}"
+                  onsubmit="return confirm('确定要删除题库「{{ bank.name }}」吗？此操作不可恢复！')">
+                <button type="submit" class="btn btn-sm btn-danger">删除</button>
+            </form>
+        </div>
+    </div>
+    {% endfor %}
+
+    <div class="bank-card" style="border-style: dashed; text-align: center; cursor: default;"
+         onclick="document.getElementById('new-bank-form').classList.toggle('hidden')">
+        <h3 style="color: var(--primary);">+ 新建题库</h3>
+        <div class="meta">点击创建</div>
+    </div>
+</div>
+
+<div id="new-bank-form" class="card hidden">
+    <form method="POST" action="{{ url_for('create_bank') }}">
+        <div class="form-group">
+            <label for="name">题库名称</label>
+            <input type="text" id="name" name="name" placeholder="例如：高中数学" required
+                   autofocus autocomplete="off">
+        </div>
+        <button type="submit" class="btn btn-primary">创建</button>
+        <button type="button" class="btn btn-outline"
+                onclick="this.closest('.card').classList.add('hidden')">取消</button>
+    </form>
+</div>
+{% endblock %}

@@ -1,0 +1,87 @@
+{% extends "base.html" %}
+{% block title %}导入题目{% endblock %}
+
+{% block content %}
+<h2 class="mb-2">📥 导入 Excel 题目</h2>
+
+<div class="card">
+    <div class="card-title">上传 Excel 文件</div>
+    <form method="POST" enctype="multipart/form-data">
+        <div class="form-group">
+            <label for="file">选择 .xlsx 文件</label>
+            <input type="file" id="file" name="file" accept=".xlsx,.xls" required>
+        </div>
+        <button type="submit" class="btn btn-primary">导入</button>
+        <a href="{{ url_for('list_questions') }}" class="btn btn-outline">取消</a>
+    </form>
+</div>
+
+<div class="card">
+    <div class="card-title">Excel 格式说明</div>
+    <p class="mb-1">第一行为表头，从第二行开始为数据。格式如下：</p>
+
+    <div style="overflow-x:auto">
+    <table style="width:100%;border-collapse:collapse;font-size:.85rem">
+        <thead>
+            <tr style="background:var(--bg)">
+                <th style="padding:8px;border:1px solid var(--border)">A 列</th>
+                <th style="padding:8px;border:1px solid var(--border)">B 列</th>
+                <th style="padding:8px;border:1px solid var(--border)">C 列</th>
+                <th style="padding:8px;border:1px solid var(--border)">D 列</th>
+                <th style="padding:8px;border:1px solid var(--border)">E 列</th>
+                <th style="padding:8px;border:1px solid var(--border)">F-I 列</th>
+                <th style="padding:8px;border:1px solid var(--border)">J 列</th>
+                <th style="padding:8px;border:1px solid var(--border)">K 列</th>
+            </tr>
+        </thead>
+        <tbody>
+            <tr>
+                <td style="padding:8px;border:1px solid var(--border)">科目</td>
+                <td style="padding:8px;border:1px solid var(--border)">标签</td>
+                <td style="padding:8px;border:1px solid var(--border)">题型</td>
+                <td style="padding:8px;border:1px solid var(--border)">难度</td>
+                <td style="padding:8px;border:1px solid var(--border)">题干</td>
+                <td style="padding:8px;border:1px solid var(--border)">选项 A-D</td>
+                <td style="padding:8px;border:1px solid var(--border)">正确答案</td>
+                <td style="padding:8px;border:1px solid var(--border)">解析</td>
+            </tr>
+            <tr>
+                <td style="padding:8px;border:1px solid var(--border)">数学</td>
+                <td style="padding:8px;border:1px solid var(--border)">函数</td>
+                <td style="padding:8px;border:1px solid var(--border)">single_choice</td>
+                <td style="padding:8px;border:1px solid var(--border)">2</td>
+                <td style="padding:8px;border:1px solid var(--border)">求f(x)=x²的导数</td>
+                <td style="padding:8px;border:1px solid var(--border)">2x / x² / 2 / x</td>
+                <td style="padding:8px;border:1px solid var(--border)">A</td>
+                <td style="padding:8px;border:1px solid var(--border)">幂函数求导公式</td>
+            </tr>
+            <tr>
+                <td style="padding:8px;border:1px solid var(--border)">计算机</td>
+                <td style="padding:8px;border:1px solid var(--border)">循环</td>
+                <td style="padding:8px;border:1px solid var(--border)">multi_choice</td>
+                <td style="padding:8px;border:1px solid var(--border)">3</td>
+                <td style="padding:8px;border:1px solid var(--border)">以下哪些是Python循环</td>
+                <td style="padding:8px;border:1px solid var(--border)">for / while / if / switch</td>
+                <td style="padding:8px;border:1px solid var(--border)">A,B</td>
+                <td style="padding:8px;border:1px solid var(--border)">if是条件判断</td>
+            </tr>
+        </tbody>
+    </table>
+    </div>
+
+    <div class="mt-2">
+        <p><strong>题型值：</strong>
+            <code>single_choice</code>（单选）、
+            <code>multi_choice</code>（多选）、
+            <code>true_false</code>（判断）、
+            <code>fill_blank</code>（填空）
+        </p>
+        <p><strong>难度值：</strong> 1（简单）、2（中等）、3（困难）</p>
+        <p><strong>多选答案：</strong> 用逗号分隔，如 <code>A,B,C</code></p>
+        <p><strong>填空多个答案：</strong> 科目不存在时会自动创建</p>
+        <p class="text-muted" style="font-size:.85rem">
+            ⚠️ Excel 导入仅支持纯文本题目。含公式、代码、图片的题目请在网页上编辑添加。
+        </p>
+    </div>
+</div>
+{% endblock %}

@@ -1,0 +1,324 @@
+{% extends "base.html" %}
+{% block title %}{% if question %}编辑题目{% else %}添加题目{% endif %}{% endblock %}
+
+{% block head %}
+<!-- TinyMCE (self-hosted, no API key needed) -->
+<script src="{{ url_for('static', filename='tinymce/tinymce.min.js') }}"></script>
+{% endblock %}
+
+{% block content %}
+<h2 class="mb-2">{% if question %}编辑题目{% else %}添加题目{% endif %}</h2>
+
+<form method="POST" id="question-form">
+    <div class="card">
+        <div class="form-row">
+            <div class="form-group">
+                <label for="subject_id">科目</label>
+                <div class="d-flex gap-1">
+                    <select id="subject_id" name="subject_id" style="flex:1">
+                        <option value="">-- 选择科目 --</option>
+                        {% for s in subjects %}
+                        <option value="{{ s.id }}" {% if question and question.subject_id==s.id %}selected{% endif %}>
+                            {{ s.name }}
+                        </option>
+                        {% endfor %}
+                    </select>
+                    <button type="button" class="btn btn-sm btn-outline" onclick="addSubject()">+ 新科目</button>
+                </div>
+            </div>
+            <div class="form-group">
+                <label for="tag">标签</label>
+                <input type="text" id="tag" name="tag" placeholder="如：函数、循环"
+                       value="{{ question.tag if question else '' }}" autocomplete="off">
+            </div>
+        </div>
+
+        <div class="form-row">
+            <div class="form-group">
+                <label for="type">题型</label>
+                <select id="type" name="type" onchange="onTypeChange()">
+                    <option value="single_choice" {% if question and question.type=='single_choice' %}selected{% endif %}>单选题</option>
+                    <option value="multi_choice" {% if question and question.type=='multi_choice' %}selected{% endif %}>多选题</option>
+                    <option value="true_false" {% if question and question.type=='true_false' %}selected{% endif %}>判断题</option>
+                    <option value="fill_blank" {% if question and question.type=='fill_blank' %}selected{% endif %}>填空题</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label for="difficulty">难度</label>
+                <select id="difficulty" name="difficulty">
+                    <option value="1" {% if question and question.difficulty==1 %}selected{% endif %}>简单</option>
+                    <option value="2" {% if question and question.difficulty==2 %}selected{% endif %}>中等</option>
+                    <option value="3" {% if question and question.difficulty==3 %}selected{% endif %}>困难</option>
+                </select>
+            </div>
+        </div>
+    </div>
+
+    <!-- Question content (TinyMCE) -->
+    <div class="card">
+        <div class="card-title">题目内容</div>
+        <div class="form-group">
+            <textarea id="content" name="content">{{ question.content if question else '' }}</textarea>
+        </div>
+        <div class="d-flex gap-1 align-center">
+            <button type="button" class="btn btn-sm btn-outline" onclick="previewContent()">
+                👁 预览效果
+            </button>
+            <span class="text-muted" style="font-size:.8rem">
+                公式用 \( \) 或 $$ $$，代码点工具栏 &lt;/&gt; 按钮
+            </span>
+        </div>
+        <div id="content-preview" class="hidden mt-1" style="padding:16px;background:#fafbfc;border:1px solid var(--border);border-radius:8px;min-height:60px"></div>
+    </div>
+
+    <!-- Options (for choice questions) -->
+    <div class="card" id="options-card">
+        <div class="card-title">选项</div>
+        <div id="options-container">
+            {% if question and question.type in ('single_choice', 'multi_choice') %}
+                {% set opts = question.options | safe %}
+                {% for opt in (question.options | tojson | safe) %}
+                {% endfor %}
+            {% endif %}
+        </div>
+        <p class="text-muted" style="font-size:.8rem">
+            选项支持富文本。数学公式和代码同题目内容。
+        </p>
+    </div>
+
+    <!-- Answer -->
+    <div class="card">
+        <div class="card-title">正确答案</div>
+        <div id="answer-area">
+            <!-- Dynamically filled based on type -->
+        </div>
+    </div>
+
+    <!-- Explanation -->
+    <div class="card">
+        <div class="card-title">答案解析（可选）</div>
+        <div class="form-group">
+            <textarea id="explanation" name="explanation">{{ question.explanation if question else '' }}</textarea>
+        </div>
+    </div>
+
+    <div class="d-flex gap-1 mt-2">
+        <button type="submit" class="btn btn-primary btn-lg">{% if question %}保存修改{% else %}添加题目{% endif %}</button>
+        <a href="{{ url_for('list_questions') }}" class="btn btn-outline btn-lg">取消</a>
+    </div>
+</form>
+
+<script>
+// Parse existing data
+{% if question %}
+const existingOptions = {{ question.options | safe }};
+const existingAnswer = "{{ question.answer | safe }}";
+{% else %}
+const existingOptions = [];
+const existingAnswer = "";
+{% endif %}
+
+function onTypeChange() {
+    const type = document.getElementById('type').value;
+    const optionsCard = document.getElementById('options-card');
+    const answerArea = document.getElementById('answer-area');
+
+    if (type === 'single_choice' || type === 'multi_choice') {
+        optionsCard.classList.remove('hidden');
+        renderOptionInputs();
+        renderChoiceAnswer(type);
+    } else if (type === 'true_false') {
+        optionsCard.classList.add('hidden');
+        renderTrueFalseAnswer();
+    } else {
+        optionsCard.classList.add('hidden');
+        renderFillBlankAnswer();
+    }
+}
+
+function renderOptionInputs() {
+    const container = document.getElementById('options-container');
+    const labels = ['A', 'B', 'C', 'D', 'E', 'F'];
+    const count = existingOptions.length > 4 ? existingOptions.length : 4;
+    let html = '';
+    for (let i = 0; i < count; i++) {
+        const val = existingOptions[i] ? existingOptions[i].content : '';
+        html += `<div class="form-group">
+            <label>${labels[i]}</label>
+            <input type="text" name="option_${labels[i].toLowerCase()}" value="${val}"
+                   placeholder="选项${labels[i]}内容" autocomplete="off">
+        </div>`;
+    }
+    container.innerHTML = html;
+}
+
+function renderChoiceAnswer(type) {
+    const area = document.getElementById('answer-area');
+    const labels = ['A', 'B', 'C', 'D', 'E', 'F'];
+    const existing = existingAnswer.split(',').map(s => s.trim());
+    const inputType = type === 'multi_choice' ? 'checkbox' : 'radio';
+
+    let html = '<div class="option-group d-flex gap-1 flex-wrap">';
+    for (let i = 0; i < 4; i++) {
+        const checked = existing.includes(labels[i]) ? 'checked' : '';
+        html += `<label style="display:flex;align-items:center;gap:6px;cursor:pointer;
+                  padding:6px 14px;border:1px solid var(--border);border-radius:var(--radius)">
+            <input type="${inputType}" name="answer_cb" value="${labels[i]}" ${checked}
+                   onchange="syncAnswer('${type}')"> ${labels[i]}
+        </label>`;
+    }
+    html += '</div>';
+    html += `<input type="hidden" id="answer-input" name="answer" value="${existingAnswer}">`;
+    area.innerHTML = html;
+}
+
+function syncAnswer(type) {
+    const checks = document.querySelectorAll('input[name="answer_cb"]:checked');
+    const vals = Array.from(checks).map(c => c.value);
+    document.getElementById('answer-input').value = vals.join(',');
+}
+
+function renderTrueFalseAnswer() {
+    const area = document.getElementById('answer-area');
+    const sel = existingAnswer;
+    area.innerHTML = `
+        <div class="option-group d-flex gap-1">
+            <label style="display:flex;align-items:center;gap:6px;cursor:pointer;
+                  padding:8px 20px;border:1px solid var(--border);border-radius:var(--radius)">
+                <input type="radio" name="answer" value="A" ${sel==='A'?'checked':''}> A. 正确
+            </label>
+            <label style="display:flex;align-items:center;gap:6px;cursor:pointer;
+                  padding:8px 20px;border:1px solid var(--border);border-radius:var(--radius)">
+                <input type="radio" name="answer" value="B" ${sel==='B'?'checked':''}> B. 错误
+            </label>
+        </div>`;
+}
+
+function renderFillBlankAnswer() {
+    const area = document.getElementById('answer-area');
+    area.innerHTML = `
+        <input type="text" name="answer" value="${existingAnswer.replace(/\|/g, ' | ')}"
+               placeholder="正确答案（多个答案用 | 分隔）" autocomplete="off">
+        <p class="text-muted mt-1" style="font-size:.8rem">多个可接受的答案用 | 分隔，如：Hello|hello</p>`;
+}
+
+// Init TinyMCE
+tinymce.init({
+    selector: '#content',
+    license_key: 'gpl',
+    height: 350,
+    menubar: false,
+    plugins: [
+        'advlist', 'autolink', 'lists', 'link', 'image', 'charmap',
+        'preview', 'anchor', 'searchreplace', 'visualblocks', 'code',
+        'fullscreen', 'insertdatetime', 'media', 'table', 'wordcount',
+        'codesample'
+    ],
+    toolbar: 'undo redo | blocks | bold italic underline | ' +
+             'alignleft aligncenter alignright | bullist numlist | ' +
+             'link image | codesample | removeformat | code',
+    codesample_languages: [
+        { text: 'Python', value: 'python' },
+        { text: 'JavaScript', value: 'javascript' },
+        { text: 'C', value: 'c' },
+        { text: 'C++', value: 'cpp' },
+        { text: 'Java', value: 'java' },
+        { text: 'HTML/XML', value: 'markup' },
+        { text: 'CSS', value: 'css' },
+        { text: 'SQL', value: 'sql' },
+        { text: 'Bash', value: 'bash' },
+    ],
+    relative_urls: false,
+    paste_data_images: true,
+    automatic_uploads: true,
+    images_upload_handler: function(blobInfo, success, failure) {
+        var xhr = new XMLHttpRequest();
+        xhr.open('POST', '{{ url_for("upload_image") }}');
+        xhr.onload = function() {
+            if (xhr.status !== 200) { failure('Upload failed: ' + xhr.status); return; }
+            var json = JSON.parse(xhr.responseText);
+            if (!json || !json.location) { failure('Invalid response'); return; }
+            success(json.location);
+        };
+        xhr.onerror = function() { failure('Network error'); };
+        var formData = new FormData();
+        formData.append('file', blobInfo.blob(), blobInfo.filename());
+        xhr.send(formData);
+    },
+});
+
+// Init TinyMCE for explanation
+tinymce.init({
+    selector: '#explanation',
+    license_key: 'gpl',
+    height: 200,
+    menubar: false,
+    plugins: ['lists', 'link', 'image', 'codesample'],
+    toolbar: 'undo redo | bold italic | bullist | link image | codesample | code',
+    relative_urls: false,
+    paste_data_images: true,
+    automatic_uploads: true,
+    images_upload_handler: function(blobInfo, success, failure) {
+        var xhr = new XMLHttpRequest();
+        xhr.open('POST', '{{ url_for("upload_image") }}');
+        xhr.onload = function() {
+            if (xhr.status !== 200) { failure('Upload failed'); return; }
+            var json = JSON.parse(xhr.responseText);
+            if (!json || !json.location) { failure('Invalid response'); return; }
+            success(json.location);
+        };
+        xhr.onerror = function() { failure('Network error'); };
+        var formData = new FormData();
+        formData.append('file', blobInfo.blob(), blobInfo.filename());
+        xhr.send(formData);
+    },
+});
+
+// Init type-based UI
+onTypeChange();
+
+function addSubject() {
+    var name = prompt('请输入新科目名称：');
+    if (!name || !name.trim()) return;
+    name = name.trim();
+
+    var xhr = new XMLHttpRequest();
+    xhr.open('POST', '{{ url_for("api_add_subject") }}');
+    xhr.setRequestHeader('Content-Type', 'application/x-www-form-urlencoded');
+    xhr.onload = function() {
+        if (xhr.status === 200) {
+            var data = JSON.parse(xhr.responseText);
+            var sel = document.getElementById('subject_id');
+            var opt = document.createElement('option');
+            opt.value = data.id;
+            opt.textContent = data.name;
+            opt.selected = true;
+            sel.appendChild(opt);
+        } else {
+            alert('添加失败：' + xhr.responseText);
+        }
+    };
+    xhr.send('name=' + encodeURIComponent(name));
+}
+
+function previewContent() {
+    var editor = tinymce.get('content');
+    if (!editor) return;
+    var html = editor.getContent();
+    var box = document.getElementById('content-preview');
+    box.innerHTML = html;
+    box.classList.remove('hidden');
+    // Re-render MathJax and Prism in the preview area
+    if (window.MathJax && MathJax.typesetPromise) {
+        MathJax.typesetPromise([box]).catch(function(err) {
+            console.warn('MathJax:', err);
+        });
+    }
+    if (window.Prism) {
+        box.querySelectorAll('pre code').forEach(function(el) {
+            Prism.highlightElement(el);
+        });
+    }
+}
+</script>
+{% endblock %}

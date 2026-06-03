@@ -1,0 +1,153 @@
+{% extends "base.html" %}
+{% block title %}练习模式 - {{ index+1 }}/{{ total }}{% endblock %}
+
+{% block content %}
+<div class="progress-bar">
+    <div class="fill" style="width:{{ ((index+1)/total*100)|round }}%"></div>
+</div>
+
+<div class="question-counter text-center text-muted mb-1">
+    第 {{ index+1 }} 题 / 共 {{ total }} 题
+</div>
+
+<!-- Question display -->
+<div class="card">
+    <div class="d-flex gap-1 mb-1 flex-wrap">
+        <span class="badge badge-type">
+            {% if question.type=='single_choice' %}单选题
+            {% elif question.type=='multi_choice' %}多选题
+            {% elif question.type=='true_false' %}判断题
+            {% elif question.type=='fill_blank' %}填空题
+            {% endif %}
+        </span>
+        <span class="badge badge-diff-{{ question.difficulty }}">
+            {% if question.difficulty==1 %}简单{% elif question.difficulty==2 %}中等{% else %}困难{% endif %}
+        </span>
+        {% if question.subject_name %}
+        <span class="badge badge-subject">{{ question.subject_name }}</span>
+        {% endif %}
+        {% if question.tag %}
+        <span class="badge badge-tag">{{ question.tag }}</span>
+        {% endif %}
+    </div>
+
+    <div class="question-content" style="font-size:1.05rem;line-height:1.8">
+        {{ question.content|safe }}
+    </div>
+</div>
+
+<!-- Answer area -->
+<form method="POST" action="{{ url_for('practice_next') }}">
+    <input type="hidden" name="qid" value="{{ question.id }}">
+    <div class="answer-area">
+        {% if question.type == 'single_choice' %}
+            <div class="option-group">
+                {% for opt in options %}
+                <label class="option-item {% if saved_answer==opt.label %}selected{% endif %}"
+                       onclick="selectOption(this, 'radio')">
+                    <input type="radio" name="answer" value="{{ opt.label }}"
+                           {% if saved_answer==opt.label %}checked{% endif %}>
+                    <span class="option-label">{{ opt.label }}.</span>
+                    <span class="option-content">{{ opt.content|safe }}</span>
+                </label>
+                {% endfor %}
+            </div>
+        {% elif question.type == 'multi_choice' %}
+            <p class="text-muted mb-1" style="font-size:.85rem">（多选题，选择所有正确答案）</p>
+            <div class="option-group">
+                {% set saved_list = saved_answer.split(',') if saved_answer else [] %}
+                {% for opt in options %}
+                <label class="option-item {% if opt.label in saved_list %}selected{% endif %}"
+                       onclick="toggleOption(this)">
+                    <input type="checkbox" name="answer_cb" value="{{ opt.label }}"
+                           {% if opt.label in saved_list %}checked{% endif %}>
+                    <span class="option-label">{{ opt.label }}.</span>
+                    <span class="option-content">{{ opt.content|safe }}</span>
+                </label>
+                {% endfor %}
+                <input type="hidden" id="answer-input" name="answer" value="{{ saved_answer }}">
+            </div>
+        {% elif question.type == 'true_false' %}
+            <div class="option-group">
+                <label class="option-item {% if saved_answer=='A' %}selected{% endif %}"
+                       onclick="selectOption(this, 'radio')">
+                    <input type="radio" name="answer" value="A" {% if saved_answer=='A' %}checked{% endif %}>
+                    <span class="option-label">A.</span>
+                    <span class="option-content">正确</span>
+                </label>
+                <label class="option-item {% if saved_answer=='B' %}selected{% endif %}"
+                       onclick="selectOption(this, 'radio')">
+                    <input type="radio" name="answer" value="B" {% if saved_answer=='B' %}checked{% endif %}>
+                    <span class="option-label">B.</span>
+                    <span class="option-content">错误</span>
+                </label>
+            </div>
+        {% elif question.type == 'fill_blank' %}
+            <input type="text" name="answer" class="fill-input" value="{{ saved_answer }}"
+                   placeholder="请输入答案" autocomplete="off">
+        {% endif %}
+    </div>
+
+    <!-- Show answer button (practice mode) -->
+    <div class="card mt-2" id="answer-reveal" style="display:none">
+        <div class="card-title">✅ 正确答案</div>
+        <div class="mb-1" style="font-size:1.1rem">
+            <strong>{{ question.answer }}</strong>
+            {% if question.type == 'true_false' %}
+                {% if question.answer == 'A' %}（正确）{% else %}（错误）{% endif %}
+            {% endif %}
+        </div>
+        {% if question.explanation %}
+        <div class="card-title mt-1">📝 解析</div>
+        <div class="question-content">{{ question.explanation|safe }}</div>
+        {% endif %}
+    </div>
+
+    <!-- Navigation -->
+    <div class="question-nav">
+        <div class="d-flex gap-1">
+            {% if index > 0 %}
+            <button type="submit" name="action" value="prev" class="btn btn-outline">← 上一题</button>
+            {% endif %}
+        </div>
+        <div class="d-flex gap-1">
+            <button type="button" class="btn btn-warning" onclick="revealAnswer()">
+                👁 查看答案
+            </button>
+            {% if index < total - 1 %}
+            <button type="submit" name="action" value="next" class="btn btn-primary">下一题 →</button>
+            {% else %}
+            <button type="submit" name="action" value="finish" class="btn btn-success">完成练习 ✓</button>
+            {% endif %}
+        </div>
+    </div>
+</form>
+
+<script>
+function selectOption(el, type) {
+    el.closest('.option-group').querySelectorAll('.option-item').forEach(item => {
+        item.classList.remove('selected');
+    });
+    el.classList.add('selected');
+    el.querySelector('input').checked = true;
+}
+
+function toggleOption(el) {
+    el.classList.toggle('selected');
+    var cb = el.querySelector('input');
+    cb.checked = !cb.checked;
+    // Sync hidden answer field
+    var checked = el.closest('.option-group').querySelectorAll('input[name="answer_cb"]:checked');
+    var vals = Array.from(checked).map(c => c.value);
+    document.getElementById('answer-input').value = vals.join(',');
+}
+
+function revealAnswer() {
+    document.getElementById('answer-reveal').style.display = 'block';
+    renderContent();
+}
+
+// Init rendering
+renderContent();
+</script>
+{% endblock %}
