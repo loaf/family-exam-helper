@@ -10,6 +10,7 @@
 <h2 class="mb-2">{% if question %}编辑题目{% else %}添加题目{% endif %}</h2>
 
 <form method="POST" id="question-form">
+    <input type="hidden" name="composite_payload" id="composite-payload" value="[]">
     <div class="card">
         <div class="form-row">
             <div class="form-group">
@@ -28,7 +29,7 @@
             </div>
             <div class="form-group">
                 <label for="tag">标签</label>
-                <input type="text" id="tag" name="tag" placeholder="如：函数、循环"
+                <input type="text" id="tag" name="tag" placeholder="如：函数、循环，组合题可用逗号写多个标签"
                        value="{{ question.tag if question else '' }}" autocomplete="off">
             </div>
         </div>
@@ -41,6 +42,7 @@
                     <option value="multi_choice" {% if question and question.type=='multi_choice' %}selected{% endif %}>多选题</option>
                     <option value="true_false" {% if question and question.type=='true_false' %}selected{% endif %}>判断题</option>
                     <option value="fill_blank" {% if question and question.type=='fill_blank' %}selected{% endif %}>填空题</option>
+                    <option value="composite" {% if question and question.type=='composite' %}selected{% endif %}>组合题</option>
                 </select>
             </div>
             <div class="form-group">
@@ -56,7 +58,7 @@
 
     <!-- Question content (TinyMCE) -->
     <div class="card">
-        <div class="card-title">题目内容</div>
+        <div class="card-title" id="content-title">题目内容</div>
         <div class="form-group">
             <textarea id="content" name="content">{{ question.content if question else '' }}</textarea>
         </div>
@@ -74,13 +76,7 @@
     <!-- Options (for choice questions) -->
     <div class="card" id="options-card">
         <div class="card-title">选项</div>
-        <div id="options-container">
-            {% if question and question.type in ('single_choice', 'multi_choice') %}
-                {% set opts = question.options | safe %}
-                {% for opt in (question.options | tojson | safe) %}
-                {% endfor %}
-            {% endif %}
-        </div>
+        <div id="options-container"></div>
         <p class="text-muted" style="font-size:.8rem">
             选项支持富文本。数学公式和代码同题目内容。
         </p>
@@ -94,9 +90,20 @@
         </div>
     </div>
 
+    <div class="card hidden" id="composite-card">
+        <div class="d-flex gap-1 align-center mb-1" style="justify-content:space-between;flex-wrap:wrap">
+            <div class="card-title" style="margin:0">小题列表</div>
+            <button type="button" class="btn btn-sm btn-primary" onclick="addCompositeItem()">+ 添加小题</button>
+        </div>
+        <p class="text-muted mb-1" style="font-size:.85rem">
+            组合题用于一个大题干搭配多个固定顺序的小题。当前支持单选、多选、判断、填空。
+        </p>
+        <div id="composite-items" style="display:grid;gap:14px"></div>
+    </div>
+
     <!-- Explanation -->
     <div class="card">
-        <div class="card-title">答案解析（可选）</div>
+        <div class="card-title" id="explanation-title">答案解析（可选）</div>
         <div class="form-group">
             <textarea id="explanation" name="explanation">{{ question.explanation if question else '' }}</textarea>
         </div>
@@ -109,28 +116,41 @@
 </form>
 
 <script>
-// Parse existing data
 {% if question %}
-const existingOptions = {{ question.options | safe }};
-const existingAnswer = "{{ question.answer | safe }}";
+const existingOptions = {{ question.options | tojson }};
+const existingAnswer = {{ question.answer | tojson }};
+const existingCompositeChildren = {{ (question.children if question.type == 'composite' else []) | tojson }};
 {% else %}
 const existingOptions = [];
 const existingAnswer = "";
+const existingCompositeChildren = [];
 {% endif %}
 
 function onTypeChange() {
     const type = document.getElementById('type').value;
     const optionsCard = document.getElementById('options-card');
     const answerArea = document.getElementById('answer-area');
+    const compositeCard = document.getElementById('composite-card');
+    document.getElementById('content-title').textContent = type === 'composite' ? '大题干 / 材料' : '题目内容';
+    document.getElementById('explanation-title').textContent = type === 'composite' ? '整组解析（可选）' : '答案解析（可选）';
 
-    if (type === 'single_choice' || type === 'multi_choice') {
+    if (type === 'composite') {
+        optionsCard.classList.add('hidden');
+        compositeCard.classList.remove('hidden');
+        answerArea.innerHTML = '<p class="text-muted">组合题按各小题分别设置答案。</p>';
+        if (!compositeItems.length) addCompositeItem();
+        renderCompositeItems();
+    } else if (type === 'single_choice' || type === 'multi_choice') {
+        compositeCard.classList.add('hidden');
         optionsCard.classList.remove('hidden');
         renderOptionInputs();
         renderChoiceAnswer(type);
     } else if (type === 'true_false') {
+        compositeCard.classList.add('hidden');
         optionsCard.classList.add('hidden');
         renderTrueFalseAnswer();
     } else {
+        compositeCard.classList.add('hidden');
         optionsCard.classList.add('hidden');
         renderFillBlankAnswer();
     }
@@ -138,8 +158,8 @@ function onTypeChange() {
 
 function renderOptionInputs() {
     const container = document.getElementById('options-container');
-    const labels = ['A', 'B', 'C', 'D', 'E', 'F'];
-    const count = existingOptions.length > 4 ? existingOptions.length : 4;
+    const labels = ['A', 'B', 'C', 'D'];
+    const count = 4;
     let html = '';
     for (let i = 0; i < count; i++) {
         const val = existingOptions[i] ? existingOptions[i].content : '';
@@ -154,7 +174,7 @@ function renderOptionInputs() {
 
 function renderChoiceAnswer(type) {
     const area = document.getElementById('answer-area');
-    const labels = ['A', 'B', 'C', 'D', 'E', 'F'];
+    const labels = ['A', 'B', 'C', 'D'];
     const existing = existingAnswer.split(',').map(s => s.trim());
     const inputType = type === 'multi_choice' ? 'checkbox' : 'radio';
 
@@ -202,6 +222,183 @@ function renderFillBlankAnswer() {
         <p class="text-muted mt-1" style="font-size:.8rem">多个可接受的答案用 | 分隔，如：Hello|hello</p>`;
 }
 
+const compositeItemSeed = () => ({
+    type: 'single_choice',
+    difficulty: document.getElementById('difficulty').value || '1',
+    content: '',
+    answer: '',
+    explanation: '',
+    options: { a: '', b: '', c: '', d: '' }
+});
+
+let compositeItems = existingCompositeChildren.map(item => ({
+    id: item.id || '',
+    type: item.type,
+    difficulty: String(item.difficulty || 1),
+    content: item.content || '',
+    answer: item.answer || '',
+    explanation: item.explanation || '',
+    options: (item.options || []).reduce((acc, opt) => {
+        acc[(opt.label || '').toLowerCase()] = opt.content || '';
+        return acc;
+    }, { a: '', b: '', c: '', d: '' })
+}));
+
+function addCompositeItem() {
+    compositeItems.push(compositeItemSeed());
+    renderCompositeItems();
+}
+
+function removeCompositeItem(index) {
+    compositeItems.splice(index, 1);
+    renderCompositeItems();
+}
+
+function moveCompositeItem(index, delta) {
+    const target = index + delta;
+    if (target < 0 || target >= compositeItems.length) return;
+    const temp = compositeItems[index];
+    compositeItems[index] = compositeItems[target];
+    compositeItems[target] = temp;
+    renderCompositeItems();
+}
+
+function updateCompositeType(index, type) {
+    compositeItems[index].type = type;
+    if (type === 'true_false' && !compositeItems[index].answer) {
+        compositeItems[index].answer = 'A';
+    }
+    renderCompositeItems();
+}
+
+function renderCompositeItems() {
+    const box = document.getElementById('composite-items');
+    box.innerHTML = compositeItems.map((item, index) => {
+        const isChoice = item.type === 'single_choice' || item.type === 'multi_choice';
+        const answerInput = isChoice
+            ? `<input type="text" data-field="answer" data-index="${index}" value="${escapeHtml(item.answer)}" placeholder="${item.type === 'multi_choice' ? '如 A,B' : '如 A'}" autocomplete="off">`
+            : item.type === 'true_false'
+                ? `<select data-field="answer" data-index="${index}">
+                        <option value="A" ${item.answer === 'A' ? 'selected' : ''}>A. 正确</option>
+                        <option value="B" ${item.answer === 'B' ? 'selected' : ''}>B. 错误</option>
+                   </select>`
+                : `<input type="text" data-field="answer" data-index="${index}" value="${escapeHtml(item.answer)}" placeholder="多个答案用 | 分隔" autocomplete="off">`;
+        return `
+            <div style="padding:16px;border:1px solid var(--border);border-radius:10px;background:#fafbfc">
+                <div class="d-flex gap-1 align-center mb-1" style="justify-content:space-between;flex-wrap:wrap">
+                    <strong>第 ${index + 1} 小题</strong>
+                    <div class="d-flex gap-1">
+                        <button type="button" class="btn btn-sm btn-outline" onclick="moveCompositeItem(${index}, -1)">上移</button>
+                        <button type="button" class="btn btn-sm btn-outline" onclick="moveCompositeItem(${index}, 1)">下移</button>
+                        <button type="button" class="btn btn-sm btn-danger" onclick="removeCompositeItem(${index})">删除</button>
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>题型</label>
+                        <select onchange="updateCompositeType(${index}, this.value)">
+                            <option value="single_choice" ${item.type === 'single_choice' ? 'selected' : ''}>单选题</option>
+                            <option value="multi_choice" ${item.type === 'multi_choice' ? 'selected' : ''}>多选题</option>
+                            <option value="true_false" ${item.type === 'true_false' ? 'selected' : ''}>判断题</option>
+                            <option value="fill_blank" ${item.type === 'fill_blank' ? 'selected' : ''}>填空题</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>难度</label>
+                        <select data-field="difficulty" data-index="${index}">
+                            <option value="1" ${item.difficulty === '1' ? 'selected' : ''}>简单</option>
+                            <option value="2" ${item.difficulty === '2' ? 'selected' : ''}>中等</option>
+                            <option value="3" ${item.difficulty === '3' ? 'selected' : ''}>困难</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>小题题干</label>
+                    <textarea rows="3" data-field="content" data-index="${index}" placeholder="请输入第 ${index + 1} 小题题干">${escapeHtml(item.content)}</textarea>
+                </div>
+                ${isChoice ? `
+                    <div class="form-row">
+                        ${['a', 'b', 'c', 'd'].map(label => `
+                            <div class="form-group">
+                                <label>选项 ${label.toUpperCase()}</label>
+                                <input type="text" data-field="option_${label}" data-index="${index}" value="${escapeHtml(item.options[label] || '')}" autocomplete="off">
+                            </div>
+                        `).join('')}
+                    </div>
+                ` : ''}
+                <div class="form-group">
+                    <label>正确答案</label>
+                    ${answerInput}
+                </div>
+                <div class="form-group">
+                    <label>小题解析（可选）</label>
+                    <textarea rows="2" data-field="explanation" data-index="${index}">${escapeHtml(item.explanation)}</textarea>
+                </div>
+                <div class="text-muted" style="font-size:.8rem">
+                    ${item.type === 'multi_choice' ? '多选题答案请使用英文逗号，如 A,B。' : item.type === 'fill_blank' ? '填空题多个可接受答案请用 | 分隔。' : item.type === 'true_false' ? '判断题固定为 A=正确，B=错误。' : '单选题答案填写选项字母，如 A。'}
+                </div>
+            </div>
+        `;
+    }).join('');
+
+    box.querySelectorAll('[data-field]').forEach(el => {
+        el.addEventListener('input', syncCompositeItemsFromDom);
+        el.addEventListener('change', syncCompositeItemsFromDom);
+    });
+}
+
+function syncCompositeItemsFromDom() {
+    document.querySelectorAll('#composite-items [data-field]').forEach(el => {
+        const index = Number(el.dataset.index);
+        const field = el.dataset.field;
+        if (!compositeItems[index]) return;
+        if (field.startsWith('option_')) {
+            compositeItems[index].options[field.replace('option_', '')] = el.value;
+        } else {
+            compositeItems[index][field] = el.value;
+        }
+    });
+}
+
+function escapeHtml(value) {
+    return String(value || '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+}
+
+function createImageUploadHandler() {
+    return function(blobInfo) {
+        return new Promise(function(resolve, reject) {
+            var xhr = new XMLHttpRequest();
+            xhr.open('POST', '{{ url_for("upload_image") }}');
+            xhr.onload = function() {
+                if (xhr.status !== 200) {
+                    reject('Upload failed: ' + xhr.status);
+                    return;
+                }
+                try {
+                    var json = JSON.parse(xhr.responseText);
+                    if (!json || !json.location) {
+                        reject('Invalid response');
+                        return;
+                    }
+                    resolve(json.location);
+                } catch (err) {
+                    reject('Invalid response');
+                }
+            };
+            xhr.onerror = function() {
+                reject('Network error');
+            };
+            var formData = new FormData();
+            formData.append('file', blobInfo.blob(), blobInfo.filename());
+            xhr.send(formData);
+        });
+    };
+}
+
 // Init TinyMCE
 tinymce.init({
     selector: '#content',
@@ -231,20 +428,7 @@ tinymce.init({
     relative_urls: false,
     paste_data_images: true,
     automatic_uploads: true,
-    images_upload_handler: function(blobInfo, success, failure) {
-        var xhr = new XMLHttpRequest();
-        xhr.open('POST', '{{ url_for("upload_image") }}');
-        xhr.onload = function() {
-            if (xhr.status !== 200) { failure('Upload failed: ' + xhr.status); return; }
-            var json = JSON.parse(xhr.responseText);
-            if (!json || !json.location) { failure('Invalid response'); return; }
-            success(json.location);
-        };
-        xhr.onerror = function() { failure('Network error'); };
-        var formData = new FormData();
-        formData.append('file', blobInfo.blob(), blobInfo.filename());
-        xhr.send(formData);
-    },
+    images_upload_handler: createImageUploadHandler(),
 });
 
 // Init TinyMCE for explanation
@@ -258,24 +442,29 @@ tinymce.init({
     relative_urls: false,
     paste_data_images: true,
     automatic_uploads: true,
-    images_upload_handler: function(blobInfo, success, failure) {
-        var xhr = new XMLHttpRequest();
-        xhr.open('POST', '{{ url_for("upload_image") }}');
-        xhr.onload = function() {
-            if (xhr.status !== 200) { failure('Upload failed'); return; }
-            var json = JSON.parse(xhr.responseText);
-            if (!json || !json.location) { failure('Invalid response'); return; }
-            success(json.location);
-        };
-        xhr.onerror = function() { failure('Network error'); };
-        var formData = new FormData();
-        formData.append('file', blobInfo.blob(), blobInfo.filename());
-        xhr.send(formData);
-    },
+    images_upload_handler: createImageUploadHandler(),
 });
 
 // Init type-based UI
 onTypeChange();
+
+document.getElementById('question-form').addEventListener('submit', function() {
+    if (document.getElementById('type').value !== 'composite') {
+        document.getElementById('composite-payload').value = '[]';
+        return;
+    }
+    syncCompositeItemsFromDom();
+    document.getElementById('composite-payload').value = JSON.stringify(
+        compositeItems.map(item => ({
+            type: item.type,
+            difficulty: item.difficulty,
+            content: item.content,
+            answer: item.answer,
+            explanation: item.explanation,
+            options: item.options
+        }))
+    );
+});
 
 function addSubject() {
     var name = prompt('请输入新科目名称：');

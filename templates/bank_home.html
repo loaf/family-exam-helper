@@ -4,7 +4,7 @@
 {% block content %}
 <div class="text-center mb-2">
     <h2>📚 {{ bank_display }}</h2>
-    <p class="text-muted">共 {{ total }} 道题目</p>
+    <p class="text-muted">共 {{ total }} 道可作答题目，其中组合题 {{ type_stats.composite_groups }} 组</p>
 </div>
 
 <!-- Stats -->
@@ -25,6 +25,10 @@
         <div style="flex:1">
             <div style="font-size:1.5rem;font-weight:700;color:var(--primary)">{{ type_stats.fill_blank }}</div>
             <div class="text-muted" style="font-size:.8rem">填空题</div>
+        </div>
+        <div style="flex:1">
+            <div style="font-size:1.5rem;font-weight:700;color:var(--primary)">{{ type_stats.composite_groups }}</div>
+            <div class="text-muted" style="font-size:.8rem">组合题组</div>
         </div>
     </div>
 </div>

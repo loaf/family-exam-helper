@@ -41,11 +41,7 @@
             </span>
             <strong>第 {{ loop.index }} 题</strong>
             <span class="badge badge-type" style="margin-left:8px">
-                {% if q.type=='single_choice' %}单选
-                {% elif q.type=='multi_choice' %}多选
-                {% elif q.type=='true_false' %}判断
-                {% elif q.type=='fill_blank' %}填空
-                {% endif %}
+                {{ q.type_label }}
             </span>
             {% if mode == 'exam' and q.score is defined %}
             <span style="margin-left:8px;color:var(--text-muted)">
@@ -60,8 +56,64 @@
         {{ q.content|safe }}
     </div>
 
-    <!-- Options for choice questions -->
-    {% if q.type in ('single_choice', 'multi_choice', 'true_false') %}
+    {% if q.type == 'composite' %}
+    <div class="mt-1 text-muted" style="font-size:.9rem">
+        本组正确 {{ q.group_correct }} / {{ q.group_total }}
+    </div>
+    {% for child in q.children_results %}
+    <div style="margin-top:12px;padding:12px;border:1px solid var(--border);border-radius:8px;background:#fafbfc">
+        <div class="d-flex gap-1 align-center flex-wrap">
+            <strong>第 {{ child.index }} 小题</strong>
+            <span class="badge badge-type">{{ child.type_label }}</span>
+            {% if mode == 'exam' %}
+            <span style="color:var(--text-muted)">{{ child.score|round(1) }} 分</span>
+            {% endif %}
+        </div>
+        <div class="question-content mt-1">{{ child.content|safe }}</div>
+        {% if child.type in ('single_choice', 'multi_choice', 'true_false') %}
+        <div class="mt-1">
+            {% for opt in child.options %}
+            <div style="padding:4px 0;font-size:.9rem;
+                 {% if opt.label in child.answer.split(',') %}color:var(--success);font-weight:600;{% endif %}
+                 {% if child.user_answer and opt.label in child.user_answer.split(',') and opt.label not in child.answer.split(',') %}color:var(--danger);text-decoration:line-through;{% endif %}">
+                {{ opt.label }}. {{ opt.content }}
+                {% if opt.label in child.answer.split(',') %} ✓{% endif %}
+            </div>
+            {% endfor %}
+        </div>
+        <div class="mt-1" style="font-size:.9rem">
+            <span class="text-muted">你的答案：</span>
+            <span {% if not child.is_correct %}style="color:var(--danger)"{% endif %}>{{ child.user_answer or '（未作答）' }}</span>
+            {% if not child.is_correct %}
+            <span style="margin-left:12px;color:var(--success)">正确答案：{{ child.answer }}</span>
+            {% endif %}
+        </div>
+        {% elif child.type == 'fill_blank' %}
+        <div class="mt-1" style="font-size:.9rem">
+            <span class="text-muted">你的答案：</span>
+            <span {% if not child.is_correct %}style="color:var(--danger);text-decoration:line-through"{% endif %}>
+                {{ child.user_answer or '（未作答）' }}
+            </span>
+            {% if not child.is_correct %}
+            <span style="margin-left:12px;color:var(--success)">正确答案：{{ child.answer }}</span>
+            {% endif %}
+        </div>
+        {% endif %}
+        {% if child.explanation %}
+        <div class="explanation-box show mt-1">
+            <strong>📝 解析：</strong>
+            <div class="question-content">{{ child.explanation|safe }}</div>
+        </div>
+        {% endif %}
+    </div>
+    {% endfor %}
+    {% if q.explanation %}
+    <div class="explanation-box show mt-1">
+        <strong>📝 整组解析：</strong>
+        <div class="question-content">{{ q.explanation|safe }}</div>
+    </div>
+    {% endif %}
+    {% elif q.type in ('single_choice', 'multi_choice', 'true_false') %}
     <div class="mt-1">
         {% for opt in q.options %}
         <div style="padding:4px 0;font-size:.9rem;

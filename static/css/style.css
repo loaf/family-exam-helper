@@ -197,6 +197,26 @@ input:focus, select:focus, textarea:focus {
     color: var(--text-muted);
     flex-wrap: wrap;
 }
+.question-actions {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    flex-wrap: wrap;
+}
+.question-actions > * {
+    margin: 0;
+    flex-shrink: 0;
+}
+.question-export-form {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    flex-wrap: wrap;
+}
+.question-export-form select {
+    width: auto;
+    min-width: 220px;
+}
 .badge {
     display: inline-block;
     padding: 2px 8px;

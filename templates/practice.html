@@ -14,11 +14,7 @@
 <div class="card">
     <div class="d-flex gap-1 mb-1 flex-wrap">
         <span class="badge badge-type">
-            {% if question.type=='single_choice' %}单选题
-            {% elif question.type=='multi_choice' %}多选题
-            {% elif question.type=='true_false' %}判断题
-            {% elif question.type=='fill_blank' %}填空题
-            {% endif %}
+            {{ question.type_label }}
         </span>
         <span class="badge badge-diff-{{ question.difficulty }}">
             {% if question.difficulty==1 %}简单{% elif question.difficulty==2 %}中等{% else %}困难{% endif %}
@@ -39,8 +35,60 @@
 <!-- Answer area -->
 <form method="POST" action="{{ url_for('practice_next') }}">
     <input type="hidden" name="qid" value="{{ question.id }}">
+    <input type="hidden" name="unit_type" value="{{ question.type }}">
     <div class="answer-area">
-        {% if question.type == 'single_choice' %}
+        {% if question.type == 'composite' %}
+            {% for child in question.children %}
+            {% set child_answer = saved_answers.get(child.id|string, '') if saved_answers is mapping else '' %}
+            <div class="card mt-1">
+                <div class="d-flex gap-1 align-center mb-1 flex-wrap">
+                    <span class="badge badge-type">第 {{ loop.index }} 小题</span>
+                    <span class="badge badge-tag">{{ child.type_label }}</span>
+                </div>
+                <div class="question-content mb-1">{{ child.content|safe }}</div>
+                {% if child.type == 'single_choice' %}
+                    <div class="option-group">
+                        {% for opt in child.options %}
+                        <label class="option-item {% if child_answer==opt.label %}selected{% endif %}" onclick="selectGroupOption(this, 'sub_answer_{{ child.id }}', 'radio')">
+                            <input type="radio" name="sub_answer_{{ child.id }}_cb" value="{{ opt.label }}" {% if child_answer==opt.label %}checked{% endif %}>
+                            <span class="option-label">{{ opt.label }}.</span>
+                            <span class="option-content">{{ opt.content|safe }}</span>
+                        </label>
+                        {% endfor %}
+                        <input type="hidden" name="sub_answer_{{ child.id }}" value="{{ child_answer }}">
+                    </div>
+                {% elif child.type == 'multi_choice' %}
+                    {% set child_list = child_answer.split(',') if child_answer else [] %}
+                    <div class="option-group">
+                        {% for opt in child.options %}
+                        <label class="option-item {% if opt.label in child_list %}selected{% endif %}" onclick="toggleGroupOption(this, 'sub_answer_{{ child.id }}')">
+                            <input type="checkbox" name="sub_answer_{{ child.id }}_cb" value="{{ opt.label }}" {% if opt.label in child_list %}checked{% endif %}>
+                            <span class="option-label">{{ opt.label }}.</span>
+                            <span class="option-content">{{ opt.content|safe }}</span>
+                        </label>
+                        {% endfor %}
+                        <input type="hidden" name="sub_answer_{{ child.id }}" value="{{ child_answer }}">
+                    </div>
+                {% elif child.type == 'true_false' %}
+                    <div class="option-group">
+                        <label class="option-item {% if child_answer=='A' %}selected{% endif %}" onclick="selectGroupOption(this, 'sub_answer_{{ child.id }}', 'radio')">
+                            <input type="radio" name="sub_answer_{{ child.id }}_cb" value="A" {% if child_answer=='A' %}checked{% endif %}>
+                            <span class="option-label">A.</span>
+                            <span class="option-content">正确</span>
+                        </label>
+                        <label class="option-item {% if child_answer=='B' %}selected{% endif %}" onclick="selectGroupOption(this, 'sub_answer_{{ child.id }}', 'radio')">
+                            <input type="radio" name="sub_answer_{{ child.id }}_cb" value="B" {% if child_answer=='B' %}checked{% endif %}>
+                            <span class="option-label">B.</span>
+                            <span class="option-content">错误</span>
+                        </label>
+                        <input type="hidden" name="sub_answer_{{ child.id }}" value="{{ child_answer }}">
+                    </div>
+                {% elif child.type == 'fill_blank' %}
+                    <input type="text" name="sub_answer_{{ child.id }}" class="fill-input" value="{{ child_answer }}" placeholder="请输入答案" autocomplete="off">
+                {% endif %}
+            </div>
+            {% endfor %}
+        {% elif question.type == 'single_choice' %}
             <div class="option-group">
                 {% for opt in options %}
                 <label class="option-item {% if saved_answer==opt.label %}selected{% endif %}"
@@ -91,15 +139,38 @@
     <!-- Show answer button (practice mode) -->
     <div class="card mt-2" id="answer-reveal" style="display:none">
         <div class="card-title">✅ 正确答案</div>
-        <div class="mb-1" style="font-size:1.1rem">
-            <strong>{{ question.answer }}</strong>
-            {% if question.type == 'true_false' %}
-                {% if question.answer == 'A' %}（正确）{% else %}（错误）{% endif %}
+        {% if question.type == 'composite' %}
+            {% for child in question.children %}
+            <div style="padding:10px 0;border-bottom:1px solid var(--border)">
+                <div><strong>第 {{ loop.index }} 小题：</strong>{{ child.type_label }}</div>
+                <div class="mt-1">
+                    <strong>
+                        {{ child.answer }}
+                        {% if child.type == 'true_false' %}
+                            {% if child.answer == 'A' %}（正确）{% else %}（错误）{% endif %}
+                        {% endif %}
+                    </strong>
+                </div>
+                {% if child.explanation %}
+                <div class="question-content mt-1">{{ child.explanation|safe }}</div>
+                {% endif %}
+            </div>
+            {% endfor %}
+            {% if question.explanation %}
+            <div class="card-title mt-1">📝 整组解析</div>
+            <div class="question-content">{{ question.explanation|safe }}</div>
             {% endif %}
-        </div>
-        {% if question.explanation %}
-        <div class="card-title mt-1">📝 解析</div>
-        <div class="question-content">{{ question.explanation|safe }}</div>
+        {% else %}
+            <div class="mb-1" style="font-size:1.1rem">
+                <strong>{{ question.answer }}</strong>
+                {% if question.type == 'true_false' %}
+                    {% if question.answer == 'A' %}（正确）{% else %}（错误）{% endif %}
+                {% endif %}
+            </div>
+            {% if question.explanation %}
+            <div class="card-title mt-1">📝 解析</div>
+            <div class="question-content">{{ question.explanation|safe }}</div>
+            {% endif %}
         {% endif %}
     </div>
 
@@ -140,6 +211,22 @@ function toggleOption(el) {
     var checked = el.closest('.option-group').querySelectorAll('input[name="answer_cb"]:checked');
     var vals = Array.from(checked).map(c => c.value);
     document.getElementById('answer-input').value = vals.join(',');
+}
+
+function selectGroupOption(el, hiddenName) {
+    el.closest('.option-group').querySelectorAll('.option-item').forEach(item => item.classList.remove('selected'));
+    el.classList.add('selected');
+    el.querySelector('input').checked = true;
+    el.closest('.option-group').querySelector(`input[name="${hiddenName}"]`).value = el.querySelector('input').value;
+}
+
+function toggleGroupOption(el, hiddenName) {
+    el.classList.toggle('selected');
+    var cb = el.querySelector('input');
+    cb.checked = !cb.checked;
+    var checked = el.closest('.option-group').querySelectorAll('input[type="checkbox"]:checked');
+    var vals = Array.from(checked).map(c => c.value);
+    el.closest('.option-group').querySelector(`input[name="${hiddenName}"]`).value = vals.join(',');
 }
 
 function revealAnswer() {
