@@ -13,6 +13,7 @@ banks/*.db-wal
 
 # Uploaded images (user data)
 uploads/*
+bank_assets/*
 
 # Import temp
 imports/*

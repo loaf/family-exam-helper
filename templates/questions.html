@@ -38,76 +38,78 @@
 </div>
 
 <!-- Question list -->
-<div class="card">
-    {% if not questions %}
-    <p class="text-center text-muted" style="padding:40px 0">暂无题目，点击"添加题目"开始</p>
-    {% endif %}
+<div class="card question-list-card">
+    <div class="question-list-scroll">
+        {% if not questions %}
+        <p class="text-center text-muted" style="padding:40px 0">暂无题目，点击"添加题目"开始</p>
+        {% endif %}
 
-    {% for q in questions %}
-    <div class="question-item">
-        <div class="question-num">{{ loop.index }}</div>
-        <div class="question-preview">
-            <div class="content question-content">
-                {{ q.content|safe }}
-            </div>
-            <div class="meta">
-                {% if q.subject_name %}
-                <span class="badge badge-subject">{{ q.subject_name }}</span>
-                {% endif %}
-                {% if q.tag %}
-                <span class="badge badge-tag">{{ q.tag }}</span>
-                {% endif %}
-                <span class="badge badge-type">
-                    {{ q.type_label }}
-                </span>
-                <span class="badge badge-diff-{{ q.difficulty }}">
-                    {% if q.difficulty==1 %}简单
-                    {% elif q.difficulty==2 %}中等
-                    {% else %}困难
-                    {% endif %}
-                </span>
-                {% if q.type == 'composite' %}
-                <span class="badge badge-tag">共 {{ q.children_count }} 小题</span>
-                {% endif %}
-            </div>
-            {% if q.type == 'composite' and q.children %}
-            <details class="mt-1">
-                <summary style="cursor:pointer;color:var(--primary)">展开小题</summary>
-                <div class="mt-1" style="display:grid;gap:10px">
-                    {% for child in q.children %}
-                    <div style="padding:12px;border:1px solid var(--border);border-radius:8px;background:#fafbfc">
-                        <div class="d-flex gap-1 align-center flex-wrap mb-1">
-                            <span class="badge badge-type">第 {{ loop.index }} 小题</span>
-                            <span class="badge badge-tag">{{ child.type_label }}</span>
-                        </div>
-                        <div class="question-content">{{ child.content|safe }}</div>
-                    </div>
-                    {% endfor %}
+        {% for q in questions %}
+        <div class="question-item">
+            <div class="question-num">{{ loop.index }}</div>
+            <div class="question-preview">
+                <div class="content question-content">
+                    {{ q.content|safe }}
                 </div>
-            </details>
-            {% endif %}
-            <div class="mt-1 question-actions">
-                <a href="{{ url_for('edit_question', qid=q.id) }}" class="btn btn-sm btn-outline">编辑</a>
-                <form method="POST" action="{{ url_for('delete_question', qid=q.id) }}"
-                      onsubmit="return confirm('确定删除？')">
-                    <button type="submit" class="btn btn-sm btn-danger">删除</button>
-                </form>
-                <form method="POST" action="{{ url_for('export_question_to_bank', qid=q.id) }}" class="question-export-form">
-                    <select name="target_bank" {% if not other_banks %}disabled{% endif %}>
-                        <option value="">导出到...</option>
-                        {% for bank in other_banks %}
-                        <option value="{{ bank.filename }}">{{ bank.name }}</option>
+                <div class="meta">
+                    {% if q.subject_name %}
+                    <span class="badge badge-subject">{{ q.subject_name }}</span>
+                    {% endif %}
+                    {% if q.tag %}
+                    <span class="badge badge-tag">{{ q.tag }}</span>
+                    {% endif %}
+                    <span class="badge badge-type">
+                        {{ q.type_label }}
+                    </span>
+                    <span class="badge badge-diff-{{ q.difficulty }}">
+                        {% if q.difficulty==1 %}简单
+                        {% elif q.difficulty==2 %}中等
+                        {% else %}困难
+                        {% endif %}
+                    </span>
+                    {% if q.type == 'composite' %}
+                    <span class="badge badge-tag">共 {{ q.children_count }} 小题</span>
+                    {% endif %}
+                </div>
+                {% if q.type == 'composite' and q.children %}
+                <details class="mt-1">
+                    <summary style="cursor:pointer;color:var(--primary)">展开小题</summary>
+                    <div class="mt-1" style="display:grid;gap:10px">
+                        {% for child in q.children %}
+                        <div style="padding:12px;border:1px solid var(--border);border-radius:8px;background:#fafbfc">
+                            <div class="d-flex gap-1 align-center flex-wrap mb-1">
+                                <span class="badge badge-type">第 {{ loop.index }} 小题</span>
+                                <span class="badge badge-tag">{{ child.type_label }}</span>
+                            </div>
+                            <div class="question-content">{{ child.content|safe }}</div>
+                        </div>
                         {% endfor %}
-                    </select>
-                    <button type="submit" class="btn btn-sm btn-success" {% if not other_banks %}disabled{% endif %}>导出到</button>
-                </form>
+                    </div>
+                </details>
+                {% endif %}
+                <div class="mt-1 question-actions">
+                    <a href="{{ url_for('edit_question', qid=q.id) }}" class="btn btn-sm btn-outline">编辑</a>
+                    <form method="POST" action="{{ url_for('delete_question', qid=q.id) }}"
+                          onsubmit="return confirm('确定删除？')">
+                        <button type="submit" class="btn btn-sm btn-danger">删除</button>
+                    </form>
+                    <form method="POST" action="{{ url_for('export_question_to_bank', qid=q.id) }}" class="question-export-form">
+                        <select name="target_bank" {% if not other_banks %}disabled{% endif %}>
+                            <option value="">导出到...</option>
+                            {% for bank in other_banks %}
+                            <option value="{{ bank.filename }}">{{ bank.name }}</option>
+                            {% endfor %}
+                        </select>
+                        <button type="submit" class="btn btn-sm btn-success" {% if not other_banks %}disabled{% endif %}>导出到</button>
+                    </form>
+                </div>
+                {% if not other_banks %}
+                <div class="text-muted mt-1">暂无其它题库可导出</div>
+                {% endif %}
             </div>
-            {% if not other_banks %}
-            <div class="text-muted mt-1">暂无其它题库可导出</div>
-            {% endif %}
         </div>
+        {% endfor %}
     </div>
-    {% endfor %}
 </div>
 {% endblock %}
 
