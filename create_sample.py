@@ -55,6 +55,7 @@ conn.executescript("""
         options TEXT DEFAULT '[]',
         answer TEXT NOT NULL DEFAULT '',
         explanation TEXT DEFAULT '',
+        score REAL DEFAULT NULL,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         FOREIGN KEY (subject_id) REFERENCES subjects(id) ON DELETE SET NULL
     );

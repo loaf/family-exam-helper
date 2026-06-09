@@ -1,0 +1,10 @@
+{
+  "default_scores_by_type": {
+    "single_choice": 2,
+    "multi_choice": 3,
+    "true_false": 1,
+    "fill_blank": 2
+  },
+  "allow_manual_question_score": true,
+  "composite_scoring_mode": "per_child"
+}

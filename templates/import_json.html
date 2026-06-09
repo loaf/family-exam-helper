@@ -1,13 +1,13 @@
 {% extends "base.html" %}
-{% block title %}导入题库备份{% endblock %}
+{% block title %}导入系统备份{% endblock %}
 
 {% block content %}
-<h2 class="mb-2">📥 导入题库备份（ZIP / JSON）</h2>
+<h2 class="mb-2">📥 导入系统备份（ZIP / JSON）</h2>
 
 <div class="card">
     <div class="card-title">上传导出文件</div>
     <p class="text-muted mb-1" style="font-size:.9rem">
-        从其他题库导出的 <code>.zip</code> 题库包或旧版 <code>.json</code> 文件都可以导入到当前题库。科目会自动合并，题目会追加到当前题库中。
+        这里用于导入本系统自己导出的备份包。如果你要导入第三方工具生成的标准模板，请回到“导入”页面使用标准模板入口。
     </p>
     <form method="POST" enctype="multipart/form-data">
         <div class="form-group">

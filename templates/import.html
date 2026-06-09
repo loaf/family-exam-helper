@@ -2,10 +2,94 @@
 {% block title %}导入题目{% endblock %}
 
 {% block content %}
-<h2 class="mb-2">📥 导入 Excel 题目</h2>
+<h2 class="mb-2">📥 导入题目</h2>
 
 <div class="card">
-    <div class="card-title">上传 Excel 文件</div>
+    <div class="card-title">标准模板导入（支持复杂组合题 + 图片）</div>
+    <p class="mb-1">
+        这是给第三方转换工具使用的标准导入格式，不依赖本系统内部题库备份结构。
+        组合题使用父题 <code>type=composite</code> + <code>children</code> 数组表示，每个小题都可以独立包含题干、选项、解析和分值。
+    </p>
+    <p class="mb-1">
+        推荐容器格式为 <code>.zip</code>，内部至少包含一个 <code>template.json</code> 和一个可选的 <code>assets/</code> 目录。
+        如果题干、解析或选项里有图片，请把图片放进 <code>assets/</code>，并在 HTML 中使用相对路径如 <code>assets/q1.png</code>。
+    </p>
+    <form method="POST" action="{{ url_for('import_template') }}" enctype="multipart/form-data" class="mt-1">
+        <div class="form-group">
+            <label for="template-file">选择标准模板 .zip 或 .json 文件</label>
+            <input type="file" id="template-file" name="file" accept=".zip,.json" required>
+        </div>
+        <button type="submit" class="btn btn-primary">导入标准模板</button>
+        <a href="{{ url_for('list_questions') }}" class="btn btn-outline">取消</a>
+    </form>
+    <div class="mt-1 text-muted" style="font-size:.9rem">
+        推荐优先使用 <code>.zip</code>。纯 <code>.json</code> 模板适合无图片场景；带图片时请使用 <code>.zip</code>。
+    </div>
+    <div class="mt-2">
+        <a href="{{ url_for('static', filename='import-template-example.json') }}" class="btn btn-sm btn-outline" target="_blank">
+            查看模板示例 JSON
+        </a>
+        <a href="{{ url_for('static', filename='import-template-example.zip') }}" class="btn btn-sm btn-outline" target="_blank">
+            下载示例 ZIP
+        </a>
+        <a href="{{ url_for('static', filename='import-template-spec.md') }}" class="btn btn-sm btn-outline" target="_blank">
+            查看字段规范
+        </a>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-title">标准模板结构</div>
+    <div style="overflow-x:auto">
+        <pre style="margin:0;padding:14px;background:#fafbfc;border:1px solid var(--border);border-radius:8px;font-size:.85rem;line-height:1.7"><code>{
+  "format": "family-exam-helper-template",
+  "version": 1,
+  "subjects": ["数学", "物理"],
+  "questions": [
+    {
+      "subject": "数学",
+      "tag": "几何,组合题",
+      "type": "composite",
+      "difficulty": 2,
+      "content": "&lt;p&gt;阅读材料：&lt;/p&gt;&lt;p&gt;&lt;img src=\"assets/figure-1.png\"&gt;&lt;/p&gt;",
+      "explanation": "&lt;p&gt;整组解析&lt;/p&gt;",
+      "children": [
+        {
+          "type": "single_choice",
+          "difficulty": 2,
+          "score": 3,
+          "content": "&lt;p&gt;根据上图，选择正确答案。&lt;/p&gt;",
+          "options": [
+            {"label": "A", "content": "选项A"},
+            {"label": "B", "content": "选项B"}
+          ],
+          "answer": "A",
+          "explanation": "&lt;p&gt;小题解析，可继续引用 &lt;img src=\"assets/detail.png\"&gt;&lt;/p&gt;"
+        }
+      ]
+    }
+  ]
+}</code></pre>
+    </div>
+    <ul style="padding-left:20px;font-size:.9rem;line-height:2" class="mt-1">
+        <li><code>format</code> 必须为 <code>family-exam-helper-template</code></li>
+        <li><code>questions</code> 中普通题与组合题共用同一入口；组合题必须用 <code>children</code> 保存小题</li>
+        <li>图片引用建议只使用 <code>assets/文件名</code> 或 <code>./assets/文件名</code></li>
+        <li>选项使用数组格式：<code>[{"label":"A","content":"..."}, ...]</code></li>
+        <li>小题不需要单独写 <code>subject</code> 和 <code>tag</code>，默认继承父题语义</li>
+    </ul>
+</div>
+
+<div class="card">
+    <div class="card-title">系统备份导入（兼容旧功能）</div>
+    <p class="mb-1 text-muted" style="font-size:.9rem">
+        如果你导入的是本系统自己导出的备份包，而不是第三方转换工具生成的标准模板，请走兼容入口。
+    </p>
+    <a href="{{ url_for('import_json') }}" class="btn btn-outline">进入系统备份导入</a>
+</div>
+
+<div class="card">
+    <div class="card-title">Excel 导入（仅纯文本简单题）</div>
     <form method="POST" enctype="multipart/form-data">
         <div class="form-group">
             <label for="file">选择 .xlsx 文件</label>
@@ -80,7 +164,7 @@
         <p><strong>多选答案：</strong> 用逗号分隔，如 <code>A,B,C</code></p>
         <p><strong>填空多个答案：</strong> 科目不存在时会自动创建</p>
         <p class="text-muted" style="font-size:.85rem">
-            ⚠️ Excel 导入仅支持纯文本题目。含公式、代码、图片的题目请在网页上编辑添加。
+            ⚠️ Excel 导入仅支持纯文本简单题，不支持带图片的题目，也不适合导入组合题。含图片或复杂组合题请使用上方的标准模板导入。
         </p>
     </div>
 </div>

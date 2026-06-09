@@ -53,6 +53,15 @@
                     <option value="3" {% if question and question.difficulty==3 %}selected{% endif %}>困难</option>
                 </select>
             </div>
+            <div class="form-group" id="score-group">
+                <label for="score">分值</label>
+                <input type="number" id="score" name="score" min="0.1" step="any"
+                       placeholder="留空则使用默认分值"
+                       value="{% if question and question.type != 'composite' and question.score is not none %}{{ question.score }}{% endif %}">
+                <p class="text-muted" id="score-hint" style="font-size:.8rem;margin-top:6px">
+                    留空则按配置文件中的题型默认分值计分。
+                </p>
+            </div>
         </div>
     </div>
 
@@ -131,26 +140,35 @@ function onTypeChange() {
     const optionsCard = document.getElementById('options-card');
     const answerArea = document.getElementById('answer-area');
     const compositeCard = document.getElementById('composite-card');
+    const scoreGroup = document.getElementById('score-group');
+    const scoreHint = document.getElementById('score-hint');
     document.getElementById('content-title').textContent = type === 'composite' ? '大题干 / 材料' : '题目内容';
     document.getElementById('explanation-title').textContent = type === 'composite' ? '整组解析（可选）' : '答案解析（可选）';
 
     if (type === 'composite') {
         optionsCard.classList.add('hidden');
         compositeCard.classList.remove('hidden');
+        scoreGroup.classList.add('hidden');
         answerArea.innerHTML = '<p class="text-muted">组合题按各小题分别设置答案。</p>';
         if (!compositeItems.length) addCompositeItem();
         renderCompositeItems();
     } else if (type === 'single_choice' || type === 'multi_choice') {
         compositeCard.classList.add('hidden');
+        scoreGroup.classList.remove('hidden');
+        scoreHint.textContent = '留空则按配置文件中的题型默认分值计分。';
         optionsCard.classList.remove('hidden');
         renderOptionInputs();
         renderChoiceAnswer(type);
     } else if (type === 'true_false') {
         compositeCard.classList.add('hidden');
+        scoreGroup.classList.remove('hidden');
+        scoreHint.textContent = '留空则按配置文件中的题型默认分值计分。';
         optionsCard.classList.add('hidden');
         renderTrueFalseAnswer();
     } else {
         compositeCard.classList.add('hidden');
+        scoreGroup.classList.remove('hidden');
+        scoreHint.textContent = '留空则按配置文件中的题型默认分值计分。';
         optionsCard.classList.add('hidden');
         renderFillBlankAnswer();
     }
@@ -225,6 +243,7 @@ function renderFillBlankAnswer() {
 const compositeItemSeed = () => ({
     type: 'single_choice',
     difficulty: document.getElementById('difficulty').value || '1',
+    score: '',
     content: '',
     answer: '',
     explanation: '',
@@ -235,6 +254,7 @@ let compositeItems = existingCompositeChildren.map(item => ({
     id: item.id || '',
     type: item.type,
     difficulty: String(item.difficulty || 1),
+    score: item.score === null || item.score === undefined ? '' : String(item.score),
     content: item.content || '',
     answer: item.answer || '',
     explanation: item.explanation || '',
@@ -245,16 +265,19 @@ let compositeItems = existingCompositeChildren.map(item => ({
 }));
 
 function addCompositeItem() {
+    syncCompositeItemsFromDom();
     compositeItems.push(compositeItemSeed());
     renderCompositeItems();
 }
 
 function removeCompositeItem(index) {
+    syncCompositeItemsFromDom();
     compositeItems.splice(index, 1);
     renderCompositeItems();
 }
 
 function moveCompositeItem(index, delta) {
+    syncCompositeItemsFromDom();
     const target = index + delta;
     if (target < 0 || target >= compositeItems.length) return;
     const temp = compositeItems[index];
@@ -264,6 +287,7 @@ function moveCompositeItem(index, delta) {
 }
 
 function updateCompositeType(index, type) {
+    syncCompositeItemsFromDom();
     compositeItems[index].type = type;
     if (type === 'true_false' && !compositeItems[index].answer) {
         compositeItems[index].answer = 'A';
@@ -271,8 +295,41 @@ function updateCompositeType(index, type) {
     renderCompositeItems();
 }
 
+function getCompositeContentEditorId(index) {
+    return `composite-content-${index}`;
+}
+
+function getCompositeExplanationEditorId(index) {
+    return `composite-explanation-${index}`;
+}
+
+function syncCompositeEditorsToData() {
+    tinymce.triggerSave();
+    document.querySelectorAll('#composite-items textarea[data-field]').forEach(el => {
+        const index = Number(el.dataset.index);
+        const field = el.dataset.field;
+        if (!compositeItems[index] || !field) return;
+        compositeItems[index][field] = el.value;
+    });
+}
+
+function destroyCompositeEditors() {
+    compositeItems.forEach((item, index) => {
+        const contentEditor = tinymce.get(getCompositeContentEditorId(index));
+        if (contentEditor) {
+            contentEditor.remove();
+        }
+        const explanationEditor = tinymce.get(getCompositeExplanationEditorId(index));
+        if (explanationEditor) {
+            explanationEditor.remove();
+        }
+    });
+}
+
 function renderCompositeItems() {
     const box = document.getElementById('composite-items');
+    syncCompositeEditorsToData();
+    destroyCompositeEditors();
     box.innerHTML = compositeItems.map((item, index) => {
         const isChoice = item.type === 'single_choice' || item.type === 'multi_choice';
         const answerInput = isChoice
@@ -311,10 +368,19 @@ function renderCompositeItems() {
                             <option value="3" ${item.difficulty === '3' ? 'selected' : ''}>困难</option>
                         </select>
                     </div>
+                    <div class="form-group">
+                        <label>分值</label>
+                        <input type="number" min="0.1" step="any" data-field="score" data-index="${index}" value="${escapeHtml(item.score)}" placeholder="留空用默认值" autocomplete="off">
+                    </div>
                 </div>
                 <div class="form-group">
                     <label>小题题干</label>
-                    <textarea rows="3" data-field="content" data-index="${index}" placeholder="请输入第 ${index + 1} 小题题干">${escapeHtml(item.content)}</textarea>
+                    <textarea id="${getCompositeContentEditorId(index)}" class="composite-content-editor"
+                              rows="6" data-field="content" data-index="${index}"
+                              placeholder="请输入第 ${index + 1} 小题题干">${escapeHtml(item.content)}</textarea>
+                    <div class="text-muted mt-1" style="font-size:.8rem">
+                        小题题干支持图片、公式和富文本排版。
+                    </div>
                 </div>
                 ${isChoice ? `
                     <div class="form-row">
@@ -332,10 +398,14 @@ function renderCompositeItems() {
                 </div>
                 <div class="form-group">
                     <label>小题解析（可选）</label>
-                    <textarea rows="2" data-field="explanation" data-index="${index}">${escapeHtml(item.explanation)}</textarea>
+                    <textarea id="${getCompositeExplanationEditorId(index)}" class="composite-explanation-editor"
+                              rows="4" data-field="explanation" data-index="${index}">${escapeHtml(item.explanation)}</textarea>
+                    <div class="text-muted mt-1" style="font-size:.8rem">
+                        小题解析同样支持图片和富文本排版。
+                    </div>
                 </div>
                 <div class="text-muted" style="font-size:.8rem">
-                    ${item.type === 'multi_choice' ? '多选题答案请使用英文逗号，如 A,B。' : item.type === 'fill_blank' ? '填空题多个可接受答案请用 | 分隔。' : item.type === 'true_false' ? '判断题固定为 A=正确，B=错误。' : '单选题答案填写选项字母，如 A。'}
+                    ${item.type === 'multi_choice' ? '多选题答案请使用英文逗号，如 A,B。' : item.type === 'fill_blank' ? '填空题多个可接受答案请用 | 分隔。' : item.type === 'true_false' ? '判断题固定为 A=正确，B=错误。' : '单选题答案填写选项字母，如 A。'} 留空分值时会使用该题型默认分值。
                 </div>
             </div>
         `;
@@ -345,9 +415,12 @@ function renderCompositeItems() {
         el.addEventListener('input', syncCompositeItemsFromDom);
         el.addEventListener('change', syncCompositeItemsFromDom);
     });
+    initCompositeContentEditors();
+    initCompositeExplanationEditors();
 }
 
 function syncCompositeItemsFromDom() {
+    syncCompositeEditorsToData();
     document.querySelectorAll('#composite-items [data-field]').forEach(el => {
         const index = Number(el.dataset.index);
         const field = el.dataset.field;
@@ -399,12 +472,89 @@ function createImageUploadHandler() {
     };
 }
 
+function buildEditorOptions(extraOptions) {
+    return Object.assign({
+        license_key: 'gpl',
+        menubar: false,
+        relative_urls: false,
+        paste_data_images: true,
+        automatic_uploads: true,
+        images_upload_handler: createImageUploadHandler(),
+    }, extraOptions || {});
+}
+
+function initCompositeContentEditors() {
+    document.querySelectorAll('.composite-content-editor').forEach(textarea => {
+        if (tinymce.get(textarea.id)) {
+            return;
+        }
+        tinymce.init(buildEditorOptions({
+            target: textarea,
+            height: 220,
+            plugins: [
+                'advlist', 'autolink', 'lists', 'link', 'image', 'charmap',
+                'preview', 'anchor', 'searchreplace', 'visualblocks', 'code',
+                'fullscreen', 'insertdatetime', 'media', 'table', 'wordcount',
+                'codesample'
+            ],
+            toolbar: 'undo redo | blocks | bold italic underline | ' +
+                     'alignleft aligncenter alignright | bullist numlist | ' +
+                     'link image | codesample | removeformat | code',
+            codesample_languages: [
+                { text: 'Python', value: 'python' },
+                { text: 'JavaScript', value: 'javascript' },
+                { text: 'C', value: 'c' },
+                { text: 'C++', value: 'cpp' },
+                { text: 'Java', value: 'java' },
+                { text: 'HTML/XML', value: 'markup' },
+                { text: 'CSS', value: 'css' },
+                { text: 'SQL', value: 'sql' },
+                { text: 'Bash', value: 'bash' },
+            ],
+            setup: function(editor) {
+                const sync = () => {
+                    const match = editor.id.match(/composite-content-(\d+)/);
+                    if (!match) return;
+                    const index = Number(match[1]);
+                    if (!Number.isNaN(index) && compositeItems[index]) {
+                        compositeItems[index].content = editor.getContent();
+                    }
+                };
+                editor.on('change input undo redo SetContent', sync);
+            }
+        }));
+    });
+}
+
+function initCompositeExplanationEditors() {
+    document.querySelectorAll('.composite-explanation-editor').forEach(textarea => {
+        if (tinymce.get(textarea.id)) {
+            return;
+        }
+        tinymce.init(buildEditorOptions({
+            target: textarea,
+            height: 180,
+            plugins: ['lists', 'link', 'image', 'codesample'],
+            toolbar: 'undo redo | bold italic | bullist | link image | codesample | code',
+            setup: function(editor) {
+                const sync = () => {
+                    const match = editor.id.match(/composite-explanation-(\d+)/);
+                    if (!match) return;
+                    const index = Number(match[1]);
+                    if (!Number.isNaN(index) && compositeItems[index]) {
+                        compositeItems[index].explanation = editor.getContent();
+                    }
+                };
+                editor.on('change input undo redo SetContent', sync);
+            }
+        }));
+    });
+}
+
 // Init TinyMCE
-tinymce.init({
+tinymce.init(buildEditorOptions({
     selector: '#content',
-    license_key: 'gpl',
     height: 350,
-    menubar: false,
     plugins: [
         'advlist', 'autolink', 'lists', 'link', 'image', 'charmap',
         'preview', 'anchor', 'searchreplace', 'visualblocks', 'code',
@@ -425,25 +575,15 @@ tinymce.init({
         { text: 'SQL', value: 'sql' },
         { text: 'Bash', value: 'bash' },
     ],
-    relative_urls: false,
-    paste_data_images: true,
-    automatic_uploads: true,
-    images_upload_handler: createImageUploadHandler(),
-});
+}));
 
 // Init TinyMCE for explanation
-tinymce.init({
+tinymce.init(buildEditorOptions({
     selector: '#explanation',
-    license_key: 'gpl',
     height: 200,
-    menubar: false,
     plugins: ['lists', 'link', 'image', 'codesample'],
     toolbar: 'undo redo | bold italic | bullist | link image | codesample | code',
-    relative_urls: false,
-    paste_data_images: true,
-    automatic_uploads: true,
-    images_upload_handler: createImageUploadHandler(),
-});
+}));
 
 // Init type-based UI
 onTypeChange();
@@ -453,11 +593,13 @@ document.getElementById('question-form').addEventListener('submit', function() {
         document.getElementById('composite-payload').value = '[]';
         return;
     }
+    syncCompositeEditorsToData();
     syncCompositeItemsFromDom();
     document.getElementById('composite-payload').value = JSON.stringify(
         compositeItems.map(item => ({
             type: item.type,
             difficulty: item.difficulty,
+            score: item.score,
             content: item.content,
             answer: item.answer,
             explanation: item.explanation,

@@ -5,22 +5,21 @@
 <!-- Score display -->
 <div class="card score-display">
     {% if mode == 'exam' %}
-    <div class="score">{{ score|round(1) }}</div>
-    <div class="unit">/ {{ total_score }} 分</div>
+    <div class="score">{{ normalized_score }}</div>
+    <div class="unit">分</div>
+    <div class="details mt-1">
+        原始得分 {{ score|round(1) }} / {{ total_score|round(1) }}
+    </div>
     {% else %}
     <div class="score">{{ correct }} / {{ total }}</div>
     <div class="unit">题正确</div>
-    {% endif %}
     <div class="details mt-1">
+    {% endif %}
         正确 {{ correct }} 题，共 {{ total }} 题
         &nbsp;|&nbsp;
         用时 {{ duration // 60 }} 分 {{ duration % 60 }} 秒
         &nbsp;|&nbsp;
-        {% if mode == 'exam' %}
         正确率 {{ ((correct/total*100)|round(1) if total > 0 else 0) }}%
-        {% else %}
-        正确率 {{ ((correct/total*100)|round(1) if total > 0 else 0) }}%
-        {% endif %}
     </div>
 </div>
 
@@ -45,7 +44,7 @@
             </span>
             {% if mode == 'exam' and q.score is defined %}
             <span style="margin-left:8px;color:var(--text-muted)">
-                {{ q.score|round(1) }} 分
+                {{ q.score|round(1) }} / {{ q.max_score|round(1) }} 分
             </span>
             {% endif %}
         </div>
@@ -59,6 +58,9 @@
     {% if q.type == 'composite' %}
     <div class="mt-1 text-muted" style="font-size:.9rem">
         本组正确 {{ q.group_correct }} / {{ q.group_total }}
+        {% if mode == 'exam' %}
+        ，得分 {{ q.score|round(1) }} / {{ q.max_score|round(1) }} 分
+        {% endif %}
     </div>
     {% for child in q.children_results %}
     <div style="margin-top:12px;padding:12px;border:1px solid var(--border);border-radius:8px;background:#fafbfc">
@@ -66,7 +68,7 @@
             <strong>第 {{ child.index }} 小题</strong>
             <span class="badge badge-type">{{ child.type_label }}</span>
             {% if mode == 'exam' %}
-            <span style="color:var(--text-muted)">{{ child.score|round(1) }} 分</span>
+            <span style="color:var(--text-muted)">{{ child.score|round(1) }} / {{ child.max_score|round(1) }} 分</span>
             {% endif %}
         </div>
         <div class="question-content mt-1">{{ child.content|safe }}</div>

@@ -5,6 +5,7 @@
 import os
 import re
 import io
+import posixpath
 import shutil
 import sqlite3
 import uuid
@@ -33,6 +34,7 @@ BANKS_DIR = os.path.join(BASE_DIR, 'banks')
 UPLOADS_DIR = os.path.join(BASE_DIR, 'uploads')
 BANK_ASSETS_DIR = os.path.join(BASE_DIR, 'bank_assets')
 IMPORTS_DIR = os.path.join(BASE_DIR, 'imports')
+SCORING_CONFIG_PATH = os.path.join(BASE_DIR, 'scoring_config.json')
 
 for d in [BANKS_DIR, UPLOADS_DIR, BANK_ASSETS_DIR, IMPORTS_DIR]:
     os.makedirs(d, exist_ok=True)
@@ -40,6 +42,20 @@ for d in [BANKS_DIR, UPLOADS_DIR, BANK_ASSETS_DIR, IMPORTS_DIR]:
 # ── Allowed extensions ───────────────────────────────────────────────
 ALLOWED_IMG_EXT = {'png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'bmp'}
 MAX_IMG_SIZE = 16 * 1024 * 1024  # 16 MB
+DEFAULT_SCORING_CONFIG = {
+    'default_scores_by_type': {
+        'single_choice': 2,
+        'multi_choice': 3,
+        'true_false': 1,
+        'fill_blank': 2,
+    },
+    'allow_manual_question_score': True,
+    'composite_scoring_mode': 'per_child',
+}
+_SCORING_CONFIG_CACHE = {
+    'mtime': None,
+    'data': None,
+}
 
 
 # ══════════════════════════════════════════════════════════════════════
@@ -78,6 +94,80 @@ def _current_bank_filename():
 
 def _asset_url(bank_filename, filename):
     return url_for('bank_asset_file', bank_filename=bank_filename, filename=filename)
+
+
+def _coerce_positive_score(value):
+    if value is None:
+        return None
+    if isinstance(value, str):
+        value = value.strip()
+        if not value:
+            return None
+    try:
+        score = float(value)
+    except (TypeError, ValueError):
+        return None
+    if score <= 0:
+        return None
+    return score
+
+
+def _load_scoring_config():
+    try:
+        mtime = os.path.getmtime(SCORING_CONFIG_PATH)
+    except OSError:
+        mtime = None
+
+    if _SCORING_CONFIG_CACHE['data'] is not None and _SCORING_CONFIG_CACHE['mtime'] == mtime:
+        return _SCORING_CONFIG_CACHE['data']
+
+    config = dict(DEFAULT_SCORING_CONFIG)
+    config['default_scores_by_type'] = dict(DEFAULT_SCORING_CONFIG['default_scores_by_type'])
+    try:
+        with open(SCORING_CONFIG_PATH, 'r', encoding='utf-8') as f:
+            raw = json.load(f)
+        if isinstance(raw, dict):
+            defaults = raw.get('default_scores_by_type', {})
+            if isinstance(defaults, dict):
+                for qtype, fallback in DEFAULT_SCORING_CONFIG['default_scores_by_type'].items():
+                    config['default_scores_by_type'][qtype] = _coerce_positive_score(defaults.get(qtype)) or fallback
+            config['allow_manual_question_score'] = bool(
+                raw.get('allow_manual_question_score', DEFAULT_SCORING_CONFIG['allow_manual_question_score'])
+            )
+            composite_mode = raw.get('composite_scoring_mode')
+            if composite_mode in {'per_child'}:
+                config['composite_scoring_mode'] = composite_mode
+    except Exception:
+        pass
+
+    _SCORING_CONFIG_CACHE['mtime'] = mtime
+    _SCORING_CONFIG_CACHE['data'] = config
+    return config
+
+
+def _get_default_score_for_type(qtype):
+    config = _load_scoring_config()
+    defaults = config.get('default_scores_by_type', {})
+    fallback = DEFAULT_SCORING_CONFIG['default_scores_by_type'].get(qtype, 1)
+    return float(_coerce_positive_score(defaults.get(qtype)) or fallback)
+
+
+def _resolve_question_score(question):
+    if not question or question.get('type') == 'composite':
+        return 0.0, False
+    manual_score = _coerce_positive_score(question.get('score'))
+    if manual_score is not None:
+        return manual_score, False
+    return _get_default_score_for_type(question.get('type')), True
+
+
+def _calculate_question_total_score(question):
+    if not question:
+        return 0.0
+    if question.get('type') != 'composite':
+        score, _ = _resolve_question_score(question)
+        return score
+    return sum(_resolve_question_score(child)[0] for child in question.get('children', []))
 
 
 def _normalize_asset_match(bank_filename, filename):
@@ -237,6 +327,7 @@ def _ensure_question_schema(conn):
             options TEXT DEFAULT '[]',
             answer TEXT NOT NULL DEFAULT '',
             explanation TEXT DEFAULT '',
+            score REAL DEFAULT NULL,
             parent_id INTEGER DEFAULT NULL,
             sort_order INTEGER DEFAULT 0,
             stem TEXT DEFAULT '',
@@ -262,9 +353,13 @@ def migrate_bank_schema(conn):
     needs_rebuild = not {'parent_id', 'sort_order', 'stem', 'is_subquestion'}.issubset(columns)
     if not needs_rebuild:
         _ensure_question_schema(conn)
+        if 'score' not in columns:
+            conn.execute("ALTER TABLE questions ADD COLUMN score REAL DEFAULT NULL")
         _repair_orphan_composites(conn)
+        conn.commit()
         return
 
+    score_select = 'score' if 'score' in columns else 'NULL'
     conn.execute("PRAGMA foreign_keys = OFF")
     conn.executescript("""
         ALTER TABLE questions RENAME TO questions_legacy;
@@ -279,6 +374,7 @@ def migrate_bank_schema(conn):
             options TEXT DEFAULT '[]',
             answer TEXT NOT NULL DEFAULT '',
             explanation TEXT DEFAULT '',
+            score REAL DEFAULT NULL,
             parent_id INTEGER DEFAULT NULL,
             sort_order INTEGER DEFAULT 0,
             stem TEXT DEFAULT '',
@@ -291,9 +387,9 @@ def migrate_bank_schema(conn):
     conn.execute(
         """
         INSERT INTO questions
-            (id, subject_id, tag, type, difficulty, content, options, answer, explanation,
+            (id, subject_id, tag, type, difficulty, content, options, answer, explanation, score,
              parent_id, sort_order, stem, is_subquestion, created_at)
-        SELECT id, subject_id, tag, type, difficulty, content, options, answer, explanation,
+        SELECT id, subject_id, tag, type, difficulty, content, options, answer, explanation, """ + score_select + """,
                NULL, 0, content, 0, created_at
         FROM questions_legacy
         """
@@ -327,9 +423,14 @@ def _repair_orphan_composites(conn):
     ).fetchall()
     repaired = False
     for parent in parents:
+        parent_id = parent['id'] if isinstance(parent, sqlite3.Row) else parent[0]
+        parent_subject_id = parent['subject_id'] if isinstance(parent, sqlite3.Row) else parent[1]
+        parent_tag = parent['tag'] if isinstance(parent, sqlite3.Row) else parent[2]
+        parent_created_at = parent['created_at'] if isinstance(parent, sqlite3.Row) else parent[3]
+        parent_content = parent['content'] if isinstance(parent, sqlite3.Row) else parent[4]
         child_count = conn.execute(
             "SELECT COUNT(*) FROM questions WHERE parent_id=?",
-            (parent['id'],)
+            (parent_id,)
         ).fetchone()[0]
         if child_count:
             continue
@@ -347,19 +448,20 @@ def _repair_orphan_composites(conn):
               AND tag = ?
             ORDER BY id
             """,
-            (parent['id'], parent['created_at'], parent['subject_id'], parent['tag'])
+            (parent_id, parent_created_at, parent_subject_id, parent_tag)
         ).fetchall()
         if not candidates:
             continue
 
         for index, row in enumerate(candidates, start=1):
+            child_id = row['id'] if isinstance(row, sqlite3.Row) else row[0]
             conn.execute(
                 """
                 UPDATE questions
                 SET parent_id=?, is_subquestion=1, sort_order=?, stem=?
                 WHERE id=?
                 """,
-                (parent['id'], index, parent['content'], row['id'])
+                (parent_id, index, parent_content, child_id)
             )
         repaired = True
 
@@ -384,6 +486,7 @@ def _normalize_multi_answer(answer):
 def _question_row_to_dict(row):
     data = dict(row)
     data['options'] = _decode_options(row['options'])
+    data['score'] = _coerce_positive_score(data.get('score'))
     data['type_label'] = QUESTION_TYPE_LABELS.get(row['type'], row['type'])
     data['is_composite'] = row['type'] == 'composite'
     return data
@@ -404,6 +507,7 @@ def _build_export_filters(source):
         'subject': (source.get('subject') or '').strip(),
         'tag': (source.get('tag') or '').strip(),
         'type': (source.get('type') or '').strip(),
+        'q': (source.get('q') or '').strip(),
     }
 
 
@@ -424,6 +528,18 @@ def _query_top_level_questions(db, filters=None):
     if filters.get('type'):
         query += " AND q.type=?"
         params.append(filters['type'])
+    if filters.get('q'):
+        keyword = f"%{filters['q']}%"
+        query += (
+            " AND ("
+            "q.content LIKE ? OR q.explanation LIKE ? OR q.tag LIKE ? "
+            "OR EXISTS ("
+            "SELECT 1 FROM questions c "
+            "WHERE c.parent_id = q.id AND (c.content LIKE ? OR c.explanation LIKE ?)"
+            ")"
+            ")"
+        )
+        params.extend([keyword, keyword, keyword, keyword, keyword])
     query += " ORDER BY q.id"
     return db.execute(query, params).fetchall()
 
@@ -434,6 +550,7 @@ def _serialize_question_export(question):
         'tag': question.get('tag', ''),
         'type': question.get('type', 'single_choice'),
         'difficulty': question.get('difficulty', 1),
+        'score': question.get('score'),
         'content': question.get('content', ''),
         'options': question.get('options', []),
         'answer': question.get('answer', ''),
@@ -444,6 +561,7 @@ def _serialize_question_export(question):
             {
                 'type': child.get('type', 'single_choice'),
                 'difficulty': child.get('difficulty', 1),
+                'score': child.get('score'),
                 'content': child.get('content', ''),
                 'options': child.get('options', []),
                 'answer': child.get('answer', ''),
@@ -469,6 +587,7 @@ def _import_question_payload(db, existing_subjects, question):
     tag = question.get('tag', '')
     qtype = question.get('type', 'single_choice')
     difficulty = int(question.get('difficulty', 1) or 1)
+    score = _coerce_positive_score(question.get('score'))
     content = question.get('content', '')
     explanation = question.get('explanation', '')
 
@@ -477,19 +596,19 @@ def _import_question_payload(db, existing_subjects, question):
         cursor = db.execute(
             """
             INSERT INTO questions
-                (subject_id,tag,type,difficulty,content,options,answer,explanation,stem,is_subquestion)
-            VALUES (?,?,?,?,?,?,?,?,?,0)
+                (subject_id,tag,type,difficulty,content,options,answer,explanation,score,stem,is_subquestion)
+            VALUES (?,?,?,?,?,?,?,?,?,?,0)
             """,
-            (subject_id, tag, 'composite', difficulty, content, '[]', '', explanation, content)
+            (subject_id, tag, 'composite', difficulty, content, '[]', '', explanation, None, content)
         )
         parent_id = cursor.lastrowid
         for index, child in enumerate(children, start=1):
             db.execute(
                 """
                 INSERT INTO questions
-                    (subject_id,tag,type,difficulty,content,options,answer,explanation,
+                    (subject_id,tag,type,difficulty,content,options,answer,explanation,score,
                      parent_id,sort_order,stem,is_subquestion)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?,1)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,1)
                 """,
                 (
                     subject_id,
@@ -500,6 +619,7 @@ def _import_question_payload(db, existing_subjects, question):
                     json.dumps(child.get('options', []) or [], ensure_ascii=False),
                     child.get('answer', ''),
                     child.get('explanation', ''),
+                    _coerce_positive_score(child.get('score')),
                     parent_id,
                     index,
                     content,
@@ -510,8 +630,8 @@ def _import_question_payload(db, existing_subjects, question):
     db.execute(
         """
         INSERT INTO questions
-            (subject_id,tag,type,difficulty,content,options,answer,explanation,stem,is_subquestion)
-        VALUES (?,?,?,?,?,?,?,?,?,0)
+            (subject_id,tag,type,difficulty,content,options,answer,explanation,score,stem,is_subquestion)
+        VALUES (?,?,?,?,?,?,?,?,?,?,0)
         """,
         (
             subject_id,
@@ -522,6 +642,7 @@ def _import_question_payload(db, existing_subjects, question):
             json.dumps(question.get('options', []) or [], ensure_ascii=False),
             question.get('answer', ''),
             explanation,
+            score,
             content,
         )
     )
@@ -681,6 +802,119 @@ def _inline_imported_asset_refs(question, imported_assets, target_bank_filename)
     return mapped
 
 
+def _normalize_template_asset_path(path):
+    raw = unquote((path or '').strip()).replace('\\', '/')
+    if not raw:
+        return None
+    normalized = posixpath.normpath(raw)
+    if normalized in {'.', ''}:
+        return None
+    if normalized.startswith('./'):
+        normalized = normalized[2:]
+    if normalized.startswith('../') or normalized == '..':
+        return None
+    if normalized.startswith('/'):
+        normalized = normalized.lstrip('/')
+    if normalized == 'assets' or not normalized.startswith('assets/'):
+        return None
+    return normalized
+
+
+def _replace_template_asset_paths_in_text(text, imported_assets, target_bank_filename):
+    if not text or not imported_assets:
+        return text
+    rendered = text
+    for asset_path, new_filename in sorted(imported_assets.items(), key=lambda item: len(item[0]), reverse=True):
+        target_url = _asset_url(target_bank_filename, new_filename)
+        encoded = quote(asset_path, safe='/')
+        for candidate in (f'./{asset_path}', asset_path, f'./{encoded}', encoded):
+            rendered = rendered.replace(candidate, target_url)
+    return rendered
+
+
+def _inline_template_imported_asset_refs(question, imported_assets, target_bank_filename):
+    if not imported_assets:
+        return question
+
+    def remap_text(value):
+        return _replace_template_asset_paths_in_text(value, imported_assets, target_bank_filename)
+
+    def remap_options(options):
+        result = []
+        for option in options or []:
+            item = dict(option)
+            item['content'] = remap_text(item.get('content', ''))
+            result.append(item)
+        return result
+
+    mapped = dict(question)
+    mapped['content'] = remap_text(mapped.get('content', ''))
+    mapped['explanation'] = remap_text(mapped.get('explanation', ''))
+    mapped['options'] = remap_options(mapped.get('options', []))
+    if mapped.get('type') == 'composite':
+        mapped['children'] = []
+        for child in question.get('children', []) or []:
+            child_item = dict(child)
+            child_item['content'] = remap_text(child_item.get('content', ''))
+            child_item['explanation'] = remap_text(child_item.get('explanation', ''))
+            child_item['options'] = remap_options(child_item.get('options', []))
+            mapped['children'].append(child_item)
+    return mapped
+
+
+def _extract_template_subject_names(data):
+    names = []
+    seen = set()
+    for item in data.get('subjects', []) or []:
+        if isinstance(item, dict):
+            name = (item.get('name') or '').strip()
+        else:
+            name = str(item or '').strip()
+        if name and name not in seen:
+            seen.add(name)
+            names.append(name)
+
+    for question in data.get('questions', []) or []:
+        name = (question.get('subject') or '').strip()
+        if name and name not in seen:
+            seen.add(name)
+            names.append(name)
+    return names
+
+
+def _load_standard_template_payload(uploaded_file):
+    filename = (uploaded_file.filename or '').lower()
+    if filename.endswith('.json'):
+        raw = uploaded_file.read().decode('utf-8')
+        data = json.loads(raw)
+        return data, {}
+    if not filename.endswith('.zip'):
+        raise ValueError('请上传标准模板文件（.zip）或模板 JSON（.json）')
+
+    raw = uploaded_file.read()
+    with zipfile.ZipFile(io.BytesIO(raw), 'r') as zf:
+        try:
+            data = json.loads(zf.read('template.json').decode('utf-8'))
+        except KeyError as exc:
+            raise ValueError('标准模板压缩包缺少 template.json') from exc
+
+        imported_assets = {}
+        asset_dir = _ensure_bank_assets_dir(_current_bank_filename())
+        for name in zf.namelist():
+            if name.endswith('/'):
+                continue
+            asset_path = _normalize_template_asset_path(name)
+            if not asset_path:
+                continue
+            ext = os.path.splitext(asset_path)[1].lower()
+            new_filename = f"{uuid.uuid4().hex}{ext}"
+            with zf.open(name) as source, open(os.path.join(asset_dir, new_filename), 'wb') as target:
+                shutil.copyfileobj(source, target)
+            imported_assets[asset_path] = new_filename
+
+    return data, imported_assets
+
+
 def _fetch_children(db, parent_id):
     rows = db.execute(
         """
@@ -767,9 +1001,23 @@ def _count_answerable_questions(db):
     return row[0] if row else 0
 
 
-def _build_result_entry(question, user_answer, score_per_item=0):
+def _count_bank_switch_questions(conn):
+    columns = {
+        row[1] for row in conn.execute("PRAGMA table_info(questions)").fetchall()
+    }
+    if 'is_subquestion' in columns:
+        row = conn.execute(
+            "SELECT COUNT(*) FROM questions WHERE COALESCE(is_subquestion, 0)=0"
+        ).fetchone()
+    else:
+        row = conn.execute("SELECT COUNT(*) FROM questions").fetchone()
+    return row[0] if row else 0
+
+
+def _build_result_entry(question, user_answer):
     if question['type'] != 'composite':
         is_correct = _check_answer(question['type'], question['answer'], user_answer)
+        max_score, uses_default_score = _resolve_question_score(question)
         return {
             'id': question['id'],
             'type': question['type'],
@@ -781,7 +1029,10 @@ def _build_result_entry(question, user_answer, score_per_item=0):
             'user_answer': user_answer,
             'is_correct': is_correct,
             'difficulty': question['difficulty'],
-            'score': score_per_item if is_correct else 0,
+            'score': max_score if is_correct else 0,
+            'max_score': max_score,
+            'manual_score': question.get('score'),
+            'uses_default_score': uses_default_score,
             'group_correct': 1 if is_correct else 0,
             'group_total': 1,
         }
@@ -789,13 +1040,16 @@ def _build_result_entry(question, user_answer, score_per_item=0):
     children_results = []
     group_correct = 0
     total_score = 0
+    max_score = 0
     answers = user_answer if isinstance(user_answer, dict) else {}
     for idx, child in enumerate(question['children'], start=1):
         child_answer = answers.get(str(child['id']), '')
         is_correct = _check_answer(child['type'], child['answer'], child_answer)
+        child_max_score, child_uses_default = _resolve_question_score(child)
+        max_score += child_max_score
         if is_correct:
             group_correct += 1
-            total_score += score_per_item
+            total_score += child_max_score
         children_results.append({
             'id': child['id'],
             'index': idx,
@@ -808,7 +1062,10 @@ def _build_result_entry(question, user_answer, score_per_item=0):
             'user_answer': child_answer,
             'is_correct': is_correct,
             'difficulty': child['difficulty'],
-            'score': score_per_item if is_correct else 0,
+            'score': child_max_score if is_correct else 0,
+            'max_score': child_max_score,
+            'manual_score': child.get('score'),
+            'uses_default_score': child_uses_default,
         })
 
     return {
@@ -827,6 +1084,7 @@ def _build_result_entry(question, user_answer, score_per_item=0):
         'group_correct': group_correct,
         'group_total': len(question['children']),
         'score': total_score,
+        'max_score': max_score,
     }
 
 
@@ -881,8 +1139,7 @@ def get_bank_list():
             if row and row[0]:
                 name = row[0]
             migrate_bank_schema(conn)
-            row = conn.execute("SELECT COUNT(*) FROM questions WHERE type != 'composite'").fetchone()
-            count = row[0] if row else 0
+            count = _count_bank_switch_questions(conn)
             conn.close()
         except Exception:
             pass
@@ -1139,7 +1396,8 @@ def list_questions():
     sf = request.args.get('subject', '')
     tf = request.args.get('tag', '')
     typef = request.args.get('type', '')
-    filters = {'subject': sf, 'tag': tf, 'type': typef}
+    qf = request.args.get('q', '').strip()
+    filters = {'subject': sf, 'tag': tf, 'type': typef, 'q': qf}
     question_rows = _query_top_level_questions(db, filters)[::-1]
     questions = []
     for row in question_rows:
@@ -1147,9 +1405,14 @@ def list_questions():
         if item['type'] == 'composite':
             item['children'] = _fetch_children(db, item['id'])
             item['children_count'] = len(item['children'])
+            item['total_score'] = _calculate_question_total_score(item)
         else:
             item['children'] = []
             item['children_count'] = 0
+            item['effective_score'], item['uses_default_score'] = _resolve_question_score(item)
+            item['total_score'] = item['effective_score']
+        for child in item['children']:
+            child['effective_score'], child['uses_default_score'] = _resolve_question_score(child)
         questions.append(item)
     subjects = db.execute('SELECT * FROM subjects ORDER BY name').fetchall()
     tags_rows = db.execute(
@@ -1160,7 +1423,7 @@ def list_questions():
     other_banks = [bank for bank in get_bank_list() if bank['filename'] != current_bank]
     return render_template('questions.html',
                            questions=questions, subjects=subjects, tags=tags,
-                           sf=sf, tf=tf, typef=typef, other_banks=other_banks)
+                           sf=sf, tf=tf, typef=typef, qf=qf, other_banks=other_banks)
 
 
 @app.route('/questions/add', methods=['GET', 'POST'])
@@ -1175,23 +1438,23 @@ def add_question():
                 cursor = db.execute(
                     """
                     INSERT INTO questions
-                        (subject_id,tag,type,difficulty,content,options,answer,explanation,stem,is_subquestion)
-                    VALUES (?,?,?,?,?,?,?,?,?,0)
+                        (subject_id,tag,type,difficulty,content,options,answer,explanation,score,stem,is_subquestion)
+                    VALUES (?,?,?,?,?,?,?,?,?,?,0)
                     """,
                     (data['subject_id'], data['tag'], 'composite', data['difficulty'],
-                     data['content'], '[]', '', data['explanation'], data['content'])
+                     data['content'], '[]', '', data['explanation'], None, data['content'])
                 )
                 parent_id = cursor.lastrowid
                 for index, child in enumerate(data['children'], start=1):
                     db.execute(
                         """
                         INSERT INTO questions
-                            (subject_id,tag,type,difficulty,content,options,answer,explanation,
+                            (subject_id,tag,type,difficulty,content,options,answer,explanation,score,
                              parent_id,sort_order,stem,is_subquestion)
-                        VALUES (?,?,?,?,?,?,?,?,?,?,?,1)
+                        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,1)
                         """,
                         (data['subject_id'], data['tag'], child['type'], child['difficulty'],
-                         child['content'], child['options'], child['answer'], child['explanation'],
+                         child['content'], child['options'], child['answer'], child['explanation'], child['score'],
                          parent_id, index, data['content'])
                     )
             else:
@@ -1199,11 +1462,11 @@ def add_question():
                 db.execute(
                     """
                     INSERT INTO questions
-                        (subject_id,tag,type,difficulty,content,options,answer,explanation,stem,is_subquestion)
-                    VALUES (?,?,?,?,?,?,?,?,?,0)
+                        (subject_id,tag,type,difficulty,content,options,answer,explanation,score,stem,is_subquestion)
+                    VALUES (?,?,?,?,?,?,?,?,?,?,0)
                     """,
                     (data['subject_id'], data['tag'], data['type'], data['difficulty'],
-                     data['content'], data['options'], data['answer'], data['explanation'], data['content'])
+                     data['content'], data['options'], data['answer'], data['explanation'], data['score'], data['content'])
                 )
         except ValueError as e:
             flash(str(e), 'error')
@@ -1234,7 +1497,7 @@ def edit_question(qid):
                     """
                     UPDATE questions
                     SET subject_id=?,tag=?,type='composite',difficulty=?,content=?,options='[]',
-                        answer='',explanation=?,parent_id=NULL,sort_order=0,stem=?,is_subquestion=0
+                        answer='',explanation=?,score=NULL,parent_id=NULL,sort_order=0,stem=?,is_subquestion=0
                     WHERE id=?
                     """,
                     (data['subject_id'], data['tag'], data['difficulty'], data['content'],
@@ -1245,12 +1508,12 @@ def edit_question(qid):
                     db.execute(
                         """
                         INSERT INTO questions
-                            (subject_id,tag,type,difficulty,content,options,answer,explanation,
+                            (subject_id,tag,type,difficulty,content,options,answer,explanation,score,
                              parent_id,sort_order,stem,is_subquestion)
-                        VALUES (?,?,?,?,?,?,?,?,?,?,?,1)
+                        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,1)
                         """,
                         (data['subject_id'], data['tag'], child['type'], child['difficulty'],
-                         child['content'], child['options'], child['answer'], child['explanation'],
+                         child['content'], child['options'], child['answer'], child['explanation'], child['score'],
                          qid, index, data['content'])
                     )
             else:
@@ -1258,12 +1521,12 @@ def edit_question(qid):
                 db.execute(
                     """
                     UPDATE questions
-                    SET subject_id=?,tag=?,type=?,difficulty=?,content=?,options=?,answer=?,explanation=?,
+                    SET subject_id=?,tag=?,type=?,difficulty=?,content=?,options=?,answer=?,explanation=?,score=?,
                         parent_id=NULL,sort_order=0,stem=?,is_subquestion=0
                     WHERE id=?
                     """,
                     (data['subject_id'], data['tag'], data['type'], data['difficulty'],
-                     data['content'], data['options'], data['answer'], data['explanation'],
+                     data['content'], data['options'], data['answer'], data['explanation'], data['score'],
                      data['content'], qid)
                 )
                 db.execute('DELETE FROM questions WHERE parent_id=?', (qid,))
@@ -1308,6 +1571,10 @@ def _parse_question_form(form):
     tag = form.get('tag', '').strip()
     qtype = form.get('type', 'single_choice')
     difficulty = int(form.get('difficulty', 1))
+    raw_score = form.get('score', '')
+    score = _coerce_positive_score(raw_score)
+    if (raw_score or '').strip() and score is None:
+        raise ValueError('题目分值必须是大于 0 的数字')
     content = form.get('content', '')
     explanation = form.get('explanation', '')
 
@@ -1323,6 +1590,7 @@ def _parse_question_form(form):
         'tag': tag,
         'type': qtype,
         'difficulty': difficulty,
+        'score': score,
         'content': content,
         'options': json.dumps(options, ensure_ascii=False),
         'answer': answer,
@@ -1358,9 +1626,14 @@ def _parse_composite_form(form):
         if qtype in ('single_choice', 'multi_choice') and len(options) < 2:
             raise ValueError(f'第 {index} 个小题至少需要两个选项')
         answer = _parse_question_answer(qtype, raw.get('answer', ''))
+        raw_score = raw.get('score', '')
+        score = _coerce_positive_score(raw_score)
+        if str(raw_score or '').strip() and score is None:
+            raise ValueError(f'第 {index} 个小题分值必须是大于 0 的数字')
         children.append({
             'type': qtype,
             'difficulty': int(raw.get('difficulty') or difficulty or 1),
+            'score': score,
             'content': child_content,
             'options': json.dumps(options, ensure_ascii=False),
             'answer': answer,
@@ -1407,22 +1680,36 @@ def import_questions():
             ws = wb.active
             count = 0
             errors = []
+            header_values = next(ws.iter_rows(min_row=1, max_row=1, values_only=True), ())
+            header_map = {
+                str(value).strip(): idx
+                for idx, value in enumerate(header_values or [])
+                if str(value or '').strip()
+            }
+
+            def get_cell(row, column_name, fallback_index=None):
+                idx = header_map.get(column_name, fallback_index)
+                if idx is None or idx >= len(row):
+                    return ''
+                return row[idx]
 
             for i, row in enumerate(ws.iter_rows(min_row=2, values_only=True), start=2):
                 try:
-                    if not row or len(row) < 10 or not row[4]:
+                    content_cell = get_cell(row, '题干', 4)
+                    if not row or not str(content_cell or '').strip():
                         continue
-                    subject_name = str(row[0] or '').strip()
-                    tag = str(row[1] or '').strip()
-                    qtype = str(row[2] or '').strip()
-                    difficulty = int(row[3] or 1)
-                    content = str(row[4] or '').strip()
-                    opt_a = str(row[5] or '').strip()
-                    opt_b = str(row[6] or '').strip()
-                    opt_c = str(row[7] or '').strip()
-                    opt_d = str(row[8] or '').strip()
-                    answer = str(row[9] or '').strip()
-                    explanation = str(row[10] or '').strip()
+                    subject_name = str(get_cell(row, '科目', 0) or '').strip()
+                    tag = str(get_cell(row, '标签', 1) or '').strip()
+                    qtype = str(get_cell(row, '题型', 2) or '').strip()
+                    difficulty = int(get_cell(row, '难度', 3) or 1)
+                    score = _coerce_positive_score(get_cell(row, '分值'))
+                    content = str(content_cell or '').strip()
+                    opt_a = str(get_cell(row, '选项A', 5) or '').strip()
+                    opt_b = str(get_cell(row, '选项B', 6) or '').strip()
+                    opt_c = str(get_cell(row, '选项C', 7) or '').strip()
+                    opt_d = str(get_cell(row, '选项D', 8) or '').strip()
+                    answer = str(get_cell(row, '正确答案', 9) or '').strip()
+                    explanation = str(get_cell(row, '解析', 10) or '').strip()
 
                     # Validate type
                     type_map = {
@@ -1454,10 +1741,10 @@ def import_questions():
                         ]
 
                     db.execute(
-                        "INSERT INTO questions (subject_id,tag,type,difficulty,content,options,answer,explanation) "
-                        "VALUES (?,?,?,?,?,?,?,?)",
+                        "INSERT INTO questions (subject_id,tag,type,difficulty,content,options,answer,explanation,score) "
+                        "VALUES (?,?,?,?,?,?,?,?,?)",
                         (subject_id, tag, qtype, difficulty, content,
-                         json.dumps(options, ensure_ascii=False), answer, explanation)
+                         json.dumps(options, ensure_ascii=False), answer, explanation, score)
                     )
                     count += 1
                 except Exception as e:
@@ -1574,6 +1861,60 @@ def import_json():
         try:
             if imported_assets:
                 q = _inline_imported_asset_refs(q, imported_assets, _current_bank_filename())
+            _import_question_payload(db, existing, q)
+            count += 1
+        except Exception as e:
+            errors.append(f'第{i}题：{e}')
+
+    db.commit()
+
+    msg = f'成功导入 {count} 道题目'
+    if errors:
+        msg += f'，{len(errors)} 题出错'
+    flash(msg, 'success' if not errors else 'warning')
+    if errors:
+        for e in errors[:5]:
+            flash(e, 'error')
+    return redirect(url_for('list_questions'))
+
+
+@app.route('/import/template', methods=['POST'])
+@require_bank
+def import_template():
+    """Import questions from the public standard template package."""
+    if 'file' not in request.files:
+        flash('请选择文件', 'error')
+        return redirect(url_for('import_questions'))
+
+    f = request.files['file']
+    if not f.filename.lower().endswith(('.json', '.zip')):
+        flash('请上传标准模板文件（.zip）或模板 JSON（.json）', 'error')
+        return redirect(url_for('import_questions'))
+
+    try:
+        data, imported_assets = _load_standard_template_payload(f)
+    except Exception as e:
+        flash(f'模板读取失败：{e}', 'error')
+        return redirect(url_for('import_questions'))
+
+    if data.get('format') != 'family-exam-helper-template':
+        flash('不是有效的标准导入模板文件', 'error')
+        return redirect(url_for('import_questions'))
+
+    db = get_db()
+    existing = {r['name']: r['id'] for r in db.execute('SELECT * FROM subjects').fetchall()}
+
+    for name in _extract_template_subject_names(data):
+        if name and name not in existing:
+            cursor = db.execute('INSERT INTO subjects (name) VALUES (?)', (name,))
+            existing[name] = cursor.lastrowid
+
+    count = 0
+    errors = []
+    for i, q in enumerate(data.get('questions', []), start=1):
+        try:
+            if imported_assets:
+                q = _inline_template_imported_asset_refs(q, imported_assets, _current_bank_filename())
             _import_question_payload(db, existing, q)
             count += 1
         except Exception as e:
@@ -1813,21 +2154,21 @@ def exam_submit():
     questions = []
     correct = 0
     total_items = 0
-    for qid in qids:
-        q = _load_question_unit(db, qid)
-        if q:
-            total_items += len(q['children']) if q['type'] == 'composite' else 1
-    score_per_q = 100.0 / total_items if total_items else 0
+    raw_score = 0.0
+    total_score = 0.0
 
     for qid in qids:
         q = _load_question_unit(db, qid)
         if q:
             user_ans = answers.get(str(qid), '')
-            result = _build_result_entry(q, user_ans, score_per_q)
+            result = _build_result_entry(q, user_ans)
             correct += result['group_correct']
+            total_items += result['group_total']
+            raw_score += result['score']
+            total_score += result.get('max_score', 0)
             questions.append(result)
 
-    total_score = correct * score_per_q
+    normalized_score = round(raw_score / total_score * 100) if total_score else 0
     duration = int(time.time() - session.get('exam_start', time.time()))
 
     # Save exam record
@@ -1835,7 +2176,7 @@ def exam_submit():
         db.execute(
             "INSERT INTO exam_records (mode,total_questions,correct_count,score,total_score,duration_seconds,answers) "
             "VALUES (?,?,?,?,?,?,?)",
-            ('exam', total_items, correct, total_score, 100,
+            ('exam', total_items, correct, raw_score, total_score,
              duration, json.dumps(answers, ensure_ascii=False))
         )
         db.commit()
@@ -1849,7 +2190,8 @@ def exam_submit():
     return render_template('result.html',
                            mode='exam', questions=questions,
                            correct=correct, total=total_items,
-                           score=total_score, total_score=100,
+                           score=raw_score, total_score=total_score,
+                           normalized_score=normalized_score,
                            duration=duration)
 
 

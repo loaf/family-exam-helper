@@ -5,7 +5,7 @@
 <div class="d-flex align-center gap-1 mb-2" style="justify-content:space-between;flex-wrap:wrap">
     <h2>题目管理</h2>
     <div class="d-flex gap-1">
-        <a href="{{ url_for('export_bank', subject=sf, tag=tf, type=typef) }}" class="btn btn-success">📤 导出当前筛选</a>
+        <a href="{{ url_for('export_bank', subject=sf, tag=tf, type=typef, q=qf) }}" class="btn btn-success">📤 导出当前筛选</a>
         <a href="{{ url_for('import_json') }}" class="btn btn-outline">📥 导入备份</a>
         <a href="{{ url_for('add_question') }}" class="btn btn-primary">+ 添加题目</a>
     </div>
@@ -14,6 +14,7 @@
 <!-- Filters -->
 <div class="card">
     <form method="GET" class="d-flex gap-1 align-center flex-wrap">
+        <input type="text" name="q" value="{{ qf or '' }}" placeholder="搜索题干、解析、标签、小题内容" style="min-width:260px;flex:1">
         <select name="subject" onchange="this.form.submit()">
             <option value="">全部科目</option>
             {% for s in subjects %}
@@ -34,6 +35,8 @@
             <option value="fill_blank" {% if typef=='fill_blank' %}selected{% endif %}>填空题</option>
             <option value="composite" {% if typef=='composite' %}selected{% endif %}>组合题</option>
         </select>
+        <button type="submit" class="btn btn-primary">搜索</button>
+        <a href="{{ url_for('list_questions') }}" class="btn btn-outline">清空</a>
     </form>
 </div>
 
@@ -68,6 +71,13 @@
                         {% endif %}
                     </span>
                     {% if q.type == 'composite' %}
+                    <span class="badge badge-tag">共 {{ q.total_score|round(1) }} 分</span>
+                    {% else %}
+                    <span class="badge badge-tag">
+                        {% if q.uses_default_score %}默认 {% endif %}{{ q.total_score|round(1) }} 分
+                    </span>
+                    {% endif %}
+                    {% if q.type == 'composite' %}
                     <span class="badge badge-tag">共 {{ q.children_count }} 小题</span>
                     {% endif %}
                 </div>
@@ -80,6 +90,9 @@
                             <div class="d-flex gap-1 align-center flex-wrap mb-1">
                                 <span class="badge badge-type">第 {{ loop.index }} 小题</span>
                                 <span class="badge badge-tag">{{ child.type_label }}</span>
+                                <span class="badge badge-tag">
+                                    {% if child.uses_default_score %}默认 {% endif %}{{ child.effective_score|round(1) }} 分
+                                </span>
                             </div>
                             <div class="question-content">{{ child.content|safe }}</div>
                         </div>
