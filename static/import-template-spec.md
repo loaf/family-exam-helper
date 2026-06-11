@@ -53,8 +53,8 @@ your-package.zip
   "score": 2,
   "content": "<p>力的国际单位是？</p>",
   "options": [
-    { "label": "A", "content": "<p>牛顿</p>" },
-    { "label": "B", "content": "<p>焦耳</p>" }
+    { "label": "A", "content": "牛顿" },
+    { "label": "B", "content": "焦耳" }
   ],
   "answer": "A",
   "explanation": "<p>力的国际单位是牛顿。</p>"
@@ -78,8 +78,8 @@ your-package.zip
       "score": 3,
       "content": "<p>根据图形判断，正确的是：</p>",
       "options": [
-        { "label": "A", "content": "<p>选项A</p>" },
-        { "label": "B", "content": "<p>选项B</p>" }
+        { "label": "A", "content": "选项A" },
+        { "label": "B", "content": "选项B" }
       ],
       "answer": "A",
       "explanation": "<p>小题解析</p>"
@@ -158,8 +158,8 @@ your-package.zip
 
 ```json
 [
-  { "label": "A", "content": "<p>选项A</p>" },
-  { "label": "B", "content": "<p>选项B</p>" }
+  { "label": "A", "content": "选项A" },
+  { "label": "B", "content": "选项B" }
 ]
 ```
 
